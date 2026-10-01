@@ -1,6 +1,5 @@
 # Scope and architecture specification
 
-Smart Waste & Recycling Network, ICS 591 Team 2. Version: M1 (Prosit 1, the first course cycle).
 
 Later milestones amend this document rather than replace it. Record each amendment in the [change log](#14-change-log).
 
