@@ -1,0 +1,139 @@
+---
+title: "Smart Waste & Recycling Network - system architecture (M1 / Level 1)"
+config:
+  layout: elk
+  flowchart:
+    curve: basis
+---
+flowchart TB
+    %% ============ CLIENTS ============
+    subgraph CLIENTS["Clients: two front doors"]
+        direction LR
+        HH_PWA["Household PWA<br/>request pickup / drop-off<br/>photo capture, offline cache"]
+        HH_FP["Household feature phone<br/>USSD PIN confirmation"]
+        RD_PWA["Rider PWA<br/>job offers, photo at pickup,<br/>phone GPS, accept / override"]
+        RD_FP["Rider feature phone<br/>USSD job accept, SMS details,<br/>voice call for location"]
+    end
+
+    %% ============ EDGE ============
+    subgraph EDGE["Edge"]
+        direction LR
+        API["API layer<br/>auth, sessions, rate limits"]
+        GW["USSD / SMS gateway (mNotify)<br/>delivery-status callbacks"]
+    end
+
+    HH_PWA -->|HTTPS: request, photo| API
+    RD_PWA -->|HTTPS: status, photo, GPS| API
+    HH_FP <-->|USSD: PIN| GW
+    RD_FP <-->|USSD / SMS / voice| GW
+    GW <-->|webhooks| API
+
+    %% ============ BACKEND ============
+    subgraph BACKEND["Backend: deterministic core, owns every payment and points decision"]
+        direction TB
+        INTAKE["Request intake<br/>general refuse | sorted plastic"]
+        DISPATCH["Rule-based dispatcher<br/>nearest available rider<br/>retry, then reassign"]
+        NOTIFY["Notification service<br/>push / SMS / voice"]
+        VORCH["Verification orchestrator<br/>calls classifier, applies thresholds"]
+        POLICY{"Decision policy<br/>accept | defer | reject"}
+        ESCROW["Escrow & points ledger<br/>authorise on request,<br/>debit only on household PIN"]
+        REWARDS["Leaderboard & vouchers"]
+        DISPUTE["Complaints & disputes"]
+        SUPQ["Supervisor review queue<br/>audit sampling, escalations,<br/>reversals"]
+    end
+
+    %% ============ LEARNED COMPONENT BOUNDARY ============
+    subgraph ML["LEARNED COMPONENT BOUNDARY<br/>no payment or identity data crosses in;<br/>never issues a payment or points instruction"]
+        direction TB
+        PRE["Pre-processing<br/>resize, quality check"]
+        DUP["Duplicate / reused-photo<br/>detector (Level 2)"]
+        CLS["Waste verification classifier<br/>clean | contaminated | wrong type"]
+        CAL["Calibrated output<br/>decision + confidence"]
+        PRE --> DUP --> CLS --> CAL
+    end
+
+    API --> INTAKE --> DISPATCH --> NOTIFY
+    NOTIFY --> GW
+    API -->|photo at pickup| VORCH
+    VORCH ==>|"IN: photo + request metadata<br/>(request id, declared type)"| PRE
+    CAL ==>|"OUT: accept | reject | uncertain<br/>+ confidence score"| VORCH
+    VORCH --> POLICY
+    POLICY -->|confident accept / reject| ESCROW
+    POLICY -->|uncertain: rider decides on the spot| NOTIFY
+    POLICY -->|repeat low confidence,<br/>high rider override rate| SUPQ
+    VORCH -.->|classifier down / timeout:<br/>manual review, never auto-accept| SUPQ
+    API -->|rider override, logged| ESCROW
+    API -->|household complaint| DISPUTE --> SUPQ
+    SUPQ -->|retroactive points / refund| ESCROW
+    ESCROW --> REWARDS
+
+    %% ============ EXTERNAL ============
+    PAY["Mobile money / payment provider"]
+    RECYCLER["Recycling partner"]
+    ESCROW <-->|authorise / capture / release| PAY
+    RECYCLER -.->|contamination reports| SUPQ
+
+    %% ============ DATA STORES ============
+    subgraph DATA["Data stores: Act 843 consent, retention, access control"]
+        direction LR
+        PII[("Personal data<br/>phone, address, rider GPS")]
+        REQDB[("Request & photo store")]
+        LEDGERDB[("Ledger DB")]
+        AUDIT[("Decision & override log<br/>photo, timestamp, actor")]
+    end
+
+    INTAKE --> PII
+    INTAKE --> REQDB
+    ESCROW --> LEDGERDB
+    SUPQ --> AUDIT
+
+    %% ============ OFFLINE TRAINING LOOP ============
+    subgraph TRAIN["Offline training loop: outside the request path"]
+        direction LR
+        LABEL["Team labelling<br/>Madina pilot photos"]
+        DS[("Labelled dataset")]
+        TRAINER["Training & evaluation<br/>false-accept / false-reject"]
+        REG[("Model registry")]
+        LABEL --> DS --> TRAINER --> REG
+    end
+
+    REQDB -.->|pickup photos| LABEL
+    AUDIT -.->|supervisor-audited labels only| LABEL
+    CLS <-.-|versioned deploy| REG
+
+    %% ============ MONITORING HOOKS (C4) ============
+    subgraph MON["Monitoring hooks: C4 stub"]
+        direction LR
+        S1{{"S1 confidence distribution<br/>per waste type"}}
+        S2{{"S2 override rate per rider"}}
+        S3{{"S3 false-accept / false-reject<br/>from audited samples"}}
+        S4{{"S4 dispute rate & outcome"}}
+        S5{{"S5 USSD / SMS delivery<br/>& response rate"}}
+        S6{{"S6 time to completion<br/>vs 2-hour target"}}
+    end
+
+    CAL -.-> S1
+    POLICY -.-> S2
+    SUPQ -.-> S3
+    DISPUTE -.-> S4
+    GW -.-> S5
+    ESCROW -.->|completion minus dispatch time| S6
+
+    %% ============ STYLES ============
+    classDef client fill:#f4f4f5,stroke:#71717a,color:#18181b
+    classDef core fill:#ffffff,stroke:#52525b,color:#18181b
+    classDef learned fill:#dbeafe,stroke:#1d4ed8,stroke-width:2px,color:#1e3a8a
+    classDef store fill:#fef9c3,stroke:#a16207,color:#422006
+    classDef ext fill:#fce7f3,stroke:#be185d,color:#500724
+    classDef hook fill:#dcfce7,stroke:#15803d,color:#14532d
+    classDef human fill:#ffedd5,stroke:#c2410c,color:#431407
+
+    class HH_PWA,HH_FP,RD_PWA,RD_FP client
+    class API,GW,INTAKE,DISPATCH,NOTIFY,VORCH,POLICY,ESCROW,REWARDS,DISPUTE,TRAINER core
+    class SUPQ,LABEL human
+    class PRE,DUP,CLS,CAL learned
+    class PII,REQDB,LEDGERDB,AUDIT,DS,REG store
+    class PAY,RECYCLER ext
+    class S1,S2,S3,S4,S5,S6 hook
+
+    style ML fill:#eff6ff,stroke:#1d4ed8,stroke-width:3px,stroke-dasharray:6 4
