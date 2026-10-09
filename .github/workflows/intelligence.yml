@@ -1,0 +1,53 @@
+name: Intelligence
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: intelligence
+
+jobs:
+  test:
+    name: Lint and test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Detect project
+        id: detect
+        run: |
+          if [ -f pyproject.toml ]; then kind=pyproject
+          elif [ -f requirements.txt ]; then kind=requirements
+          else
+            echo "::notice title=Intelligence::No intelligence/pyproject.toml or requirements.txt yet, nothing to check."
+            kind=none
+          fi
+          echo "kind=$kind" >> "$GITHUB_OUTPUT"
+      - if: steps.detect.outputs.kind != 'none'
+        uses: astral-sh/setup-uv@v10
+        with:
+          working-directory: intelligence
+          enable-cache: true
+      - name: Install dependencies
+        if: steps.detect.outputs.kind != 'none'
+        env:
+          KIND: ${{ steps.detect.outputs.kind }}
+        run: |
+          if [ "$KIND" = pyproject ]; then
+            if [ -f uv.lock ]; then uv sync --locked; else uv sync; fi
+            uv pip install pytest
+          else
+            uv venv
+            uv pip install -r requirements.txt pytest
+          fi
+      - name: Lint
+        if: steps.detect.outputs.kind != 'none'
+        run: uvx ruff check .
+      - name: Test
+        if: steps.detect.outputs.kind != 'none'
+        run: |
+          # pytest exits 5 when it collects no tests; that is not a failure yet.
+          .venv/bin/python -m pytest || [ $? -eq 5 ]

@@ -1,0 +1,35 @@
+services:
+  - type: web
+    name: engine-staging
+    runtime: python
+    rootDir: backend
+    region: frankfurt
+    plan: free
+    branch: main
+    # GitHub Actions deploys tested commits through the deploy hook.
+    autoDeployTrigger: "off"
+    buildCommand: uv sync --locked --no-dev
+    startCommand: uv run --no-sync uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.11
+      - key: UV_PYTHON_PREFERENCE
+        value: only-system
+
+  - type: web
+    name: engine
+    runtime: python
+    rootDir: backend
+    region: frankfurt
+    plan: free
+    branch: main
+    autoDeployTrigger: "off"
+    buildCommand: uv sync --locked --no-dev
+    startCommand: uv run --no-sync uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.11
+      - key: UV_PYTHON_PREFERENCE
+        value: only-system
