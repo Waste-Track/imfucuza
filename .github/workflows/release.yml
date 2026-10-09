@@ -1,0 +1,53 @@
+name: Release to production
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Commit on main to release (empty = latest main)
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify commit
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: read
+    outputs:
+      sha: ${{ steps.resolve.outputs.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Resolve and check the commit
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_SHA: ${{ inputs.sha }}
+        run: |
+          sha=$(git rev-parse --verify "${INPUT_SHA:-origin/main}^{commit}")
+          git merge-base --is-ancestor "$sha" origin/main || { echo "::error::$sha is not on main"; exit 1; }
+          result=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${sha}/check-runs?check_name=ci-ok" \
+            --jq '[.check_runs[] | .conclusion] | first // "missing"')
+          [ "$result" = success ] || { echo "::error::ci-ok is '$result' for $sha"; exit 1; }
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "Releasing $sha"
+
+  deploy:
+    name: Production
+    needs: verify
+    uses: ./.github/workflows/deploy.yml
+    with:
+      environment: production
+      ref: ${{ needs.verify.outputs.sha }}
+      db: true
+      backend: true
+      frontend: true
+      intelligence: true
+    secrets: inherit

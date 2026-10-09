@@ -1,0 +1,114 @@
+name: Deploy
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        type: string
+        required: true
+      ref:
+        description: Commit SHA to deploy
+        type: string
+        required: true
+      db:
+        type: boolean
+        default: false
+      backend:
+        type: boolean
+        default: false
+      frontend:
+        type: boolean
+        default: false
+      intelligence:
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy (${{ inputs.environment }})
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    concurrency:
+      group: deploy-${{ inputs.environment }}
+      cancel-in-progress: false
+    env:
+      ENVIRONMENT: ${{ inputs.environment }}
+      REF: ${{ inputs.ref }}
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+      SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+      BACKEND_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_BACKEND }}
+      BACKEND_URL: ${{ vars.BACKEND_URL }}
+      FRONTEND_HOOK: ${{ secrets.FRONTEND_DEPLOY_HOOK }}
+      INTELLIGENCE_HOOK: ${{ secrets.INTELLIGENCE_DEPLOY_HOOK }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Check what this environment is configured for
+        id: config
+        run: |
+          # Prints true only if every argument is non-empty.
+          ready() { for v in "$@"; do [ -n "$v" ] || { echo false; return; }; done; echo true; }
+          {
+            echo "db=$(ready "$SUPABASE_ACCESS_TOKEN" "$SUPABASE_DB_PASSWORD" "$SUPABASE_PROJECT_REF")"
+            echo "backend=$(ready "$BACKEND_HOOK" "$BACKEND_URL")"
+            echo "frontend=$(ready "$FRONTEND_HOOK")"
+            echo "intelligence=$(ready "$INTELLIGENCE_HOOK")"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Report skipped deploys
+        env:
+          WANT_DB: ${{ inputs.db }}
+          WANT_BACKEND: ${{ inputs.backend }}
+          WANT_FRONTEND: ${{ inputs.frontend }}
+          WANT_INTELLIGENCE: ${{ inputs.intelligence }}
+          HAVE_DB: ${{ steps.config.outputs.db }}
+          HAVE_BACKEND: ${{ steps.config.outputs.backend }}
+          HAVE_FRONTEND: ${{ steps.config.outputs.frontend }}
+          HAVE_INTELLIGENCE: ${{ steps.config.outputs.intelligence }}
+        run: |
+          for s in DB BACKEND FRONTEND INTELLIGENCE; do
+            want="WANT_$s"; have="HAVE_$s"
+            if [ "${!want}" = true ] && [ "${!have}" != true ]; then
+              echo "::warning title=Deploy skipped::${s,,} has changes but is not configured for ${ENVIRONMENT}. See README, CI/CD section."
+            fi
+          done
+
+      # Migrations run first so the backend never starts against an older schema.
+      - if: inputs.db && steps.config.outputs.db == 'true'
+        uses: supabase/setup-cli@45a513f8c64c0bc8e0e3dfe572b5c95be85f6359 # v3.0.1
+        with:
+          version: 2.120.0
+      - name: Apply database migrations
+        if: inputs.db && steps.config.outputs.db == 'true'
+        working-directory: backend
+        run: |
+          supabase link --project-ref "$SUPABASE_PROJECT_REF"
+          supabase db push
+
+      - name: Deploy backend
+        if: inputs.backend && steps.config.outputs.backend == 'true'
+        run: curl -fsS -X POST "${BACKEND_HOOK}&ref=${REF}" -o /dev/null
+      - name: Wait for the backend to serve this commit
+        if: inputs.backend && steps.config.outputs.backend == 'true'
+        timeout-minutes: 20
+        run: |
+          while true; do
+            live=$(curl -fsS "${BACKEND_URL}/health" | jq -r .commit 2>/dev/null || true)
+            if [ "$live" = "$REF" ]; then echo "Backend is serving ${REF}"; break; fi
+            echo "Backend reports '${live:-unreachable}', waiting..."
+            sleep 15
+          done
+
+      - name: Deploy frontend
+        if: inputs.frontend && steps.config.outputs.frontend == 'true'
+        run: curl -fsS -X POST "$FRONTEND_HOOK" -o /dev/null
+
+      - name: Deploy intelligence
+        if: inputs.intelligence && steps.config.outputs.intelligence == 'true'
+        run: curl -fsS -X POST "$INTELLIGENCE_HOOK" -o /dev/null

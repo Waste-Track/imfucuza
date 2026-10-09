@@ -1,0 +1,65 @@
+name: Frontend
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: frontend
+
+jobs:
+  build:
+    name: Lint, test and build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Detect project
+        id: detect
+        run: |
+          if [ ! -f package.json ]; then
+            echo "::notice title=Frontend::No frontend/package.json yet, nothing to check."
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "present=true" >> "$GITHUB_OUTPUT"
+          if [ -f pnpm-lock.yaml ]; then pm=pnpm
+          elif [ -f yarn.lock ]; then pm=yarn
+          else pm=npm
+          fi
+          node=24
+          for f in .nvmrc .node-version; do
+            if [ -f "$f" ]; then node=$(tr -d '[:space:]' < "$f"); break; fi
+          done
+          echo "pm=$pm" >> "$GITHUB_OUTPUT"
+          echo "node=$node" >> "$GITHUB_OUTPUT"
+      - if: steps.detect.outputs.present == 'true'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ steps.detect.outputs.node }}
+      - name: Install dependencies
+        if: steps.detect.outputs.present == 'true'
+        env:
+          PM: ${{ steps.detect.outputs.pm }}
+        run: |
+          case "$PM" in
+            pnpm) corepack enable && pnpm install --frozen-lockfile ;;
+            yarn) corepack enable && yarn install --immutable ;;
+            npm) if [ -f package-lock.json ]; then npm ci; else npm install; fi ;;
+          esac
+      - name: Run lint, typecheck, test and build scripts that exist
+        if: steps.detect.outputs.present == 'true'
+        env:
+          PM: ${{ steps.detect.outputs.pm }}
+        run: |
+          for script in lint typecheck test build; do
+            if node -e "process.exit(require('./package.json').scripts?.['$script'] ? 0 : 1)"; then
+              echo "::group::$PM run $script"
+              "$PM" run "$script"
+              echo "::endgroup::"
+            else
+              echo "No '$script' script, skipped."
+            fi
+          done
