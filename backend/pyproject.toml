@@ -5,7 +5,7 @@ description = "Engine: backend API, dispatcher, ledger and messaging for the Sma
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115",
-    "uvicorn[standard]>=0.32",
+    "uvicorn[standard]>=0.54.0",
 ]
 
 [dependency-groups]
