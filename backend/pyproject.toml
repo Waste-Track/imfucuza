@@ -5,6 +5,10 @@ description = "Engine: backend API, dispatcher, ledger and messaging for the Sma
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115",
+    "psycopg-pool>=3.2",
+    "psycopg[binary]>=3.2",
+    "pydantic-settings>=2.6",
+    "pyjwt[crypto]>=2.10",
     "uvicorn[standard]>=0.32",
 ]
 
@@ -23,7 +27,7 @@ target-version = "py312"
 select = ["E", "F", "I", "B", "UP", "S"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101"]
+"tests/**" = ["S101", "S311"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

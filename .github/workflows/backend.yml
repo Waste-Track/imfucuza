@@ -11,8 +11,8 @@ defaults:
     working-directory: backend
 
 jobs:
-  test:
-    name: Lint and test
+  lint:
+    name: Lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -23,21 +23,29 @@ jobs:
       - run: uv sync --locked
       - run: uv run ruff check .
       - run: uv run ruff format --check .
-      - run: uv run pytest
 
-  database:
-    name: Migrations and RLS
+  test:
+    name: Migrations and tests
     runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: supabase/setup-cli@45a513f8c64c0bc8e0e3dfe572b5c95be85f6359 # v3.0.1
         with:
           version: 2.120.0
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          working-directory: backend
+          enable-cache: true
       - name: Start local Postgres
         run: supabase db start
       - name: Apply all migrations from scratch
         run: supabase db reset
       - name: Lint database functions
         run: supabase db lint --fail-on error
-      - name: Require row-level security on every public table
-        run: psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f scripts/check_rls.sql
+      - name: Require row-level security and a private engine schema
+        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/check_rls.sql
+      - run: uv sync --locked
+      - name: Run tests against the local database
+        run: uv run pytest

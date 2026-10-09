@@ -1,8 +1,30 @@
 import os
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-app = FastAPI(title="Engine", version="0.1.0")
+from app.api import internal
+from app.config import get_settings
+from app.db import create_pool
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    settings = get_settings()
+    settings.check_deployable()
+    pool = create_pool(settings)
+    # Fail the deploy if the database is unreachable, rather than serving /health.
+    await pool.open(wait=True, timeout=15)
+    app.state.pool = pool
+    try:
+        yield
+    finally:
+        await pool.close()
+
+
+app = FastAPI(title="Engine", version="0.1.0", lifespan=lifespan)
+app.include_router(internal.router)
 
 
 @app.get("/health")
