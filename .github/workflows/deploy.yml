@@ -45,7 +45,7 @@ jobs:
       FRONTEND_HOOK: ${{ secrets.FRONTEND_DEPLOY_HOOK }}
       INTELLIGENCE_HOOK: ${{ secrets.INTELLIGENCE_DEPLOY_HOOK }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.ref }}
 
@@ -81,7 +81,7 @@ jobs:
 
       # Migrations run first so the backend never starts against an older schema.
       - if: inputs.db && steps.config.outputs.db == 'true'
-        uses: supabase/setup-cli@v3
+        uses: supabase/setup-cli@45a513f8c64c0bc8e0e3dfe572b5c95be85f6359 # v3.0.1
         with:
           version: 2.120.0
       - name: Apply database migrations

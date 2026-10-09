@@ -11,27 +11,27 @@ Smart Waste & Recycling Network for Madina, Accra. ICS 591 Team 2.
 
 ## CI/CD
 
-GitHub Actions runs [`pipeline.yml`](.github/workflows/pipeline.yml) on every pull request and every push to `main`.
+GitHub Actions runs [`pipeline.yml`](.github/workflows/pipeline.yml) on every pull request and push to `main`. It calls one workflow per folder, then a final `ci-ok` job.
 
 ### Checks
 
-Each folder has its own workflow, which runs only when that folder changes:
+A folder's workflow runs only when that folder changes:
 
 | Workflow | Runs |
 | --- | --- |
-| [`backend.yml`](.github/workflows/backend.yml) | `ruff check`, `ruff format --check`, `pytest`. Applies every migration to a fresh local Supabase database, lints it, and fails if any `public` table lacks row-level security. |
+| [`backend.yml`](.github/workflows/backend.yml) | `ruff check`, `ruff format --check`, `pytest`. Applies every migration to a fresh local Supabase database, lints the schema, and fails if any `public` table lacks row-level security. |
 | [`frontend.yml`](.github/workflows/frontend.yml) | Installs with the lockfile's package manager, then runs the `lint`, `typecheck`, `test` and `build` scripts that exist in `package.json`. |
 | [`intelligence.yml`](.github/workflows/intelligence.yml) | Installs from `pyproject.toml` or `requirements.txt`, then runs `ruff check` and `pytest`. |
 
 Every run also scans the full history for secrets with gitleaks, and lints workflow files with actionlint when they change.
 
-`ci-ok` passes only when every job passed or was skipped. Make it the single required check on `main`.
+`ci-ok` passes only when every job in the run passed or was skipped. Make it the single required check in the branch protection rule for `main`.
 
 ### Deploys
 
 | Trigger | Target | What happens |
 | --- | --- | --- |
-| Push to `main` | `staging` | Deploys only the parts that changed, after `ci-ok` passes |
+| Push to `main` | `staging` | Deploys only the folders that changed, after `ci-ok` passes |
 | Run **Release to production** (Actions tab) | `production` | Deploys a commit from `main` whose `ci-ok` passed. Needs approval if the `production` environment requires reviewers |
 
 Order within a deploy:
@@ -43,7 +43,7 @@ Migrations run before the new backend starts, so the old backend briefly runs ag
 
 ### Configuration
 
-Set these per environment under **Settings → Environments** (`staging` and `production`). A part without its configuration is skipped with a warning, not failed.
+Set these per environment under **Settings → Environments** (`staging` and `production`). A folder without its configuration is skipped with a warning, not failed.
 
 | Name | Kind | Used for |
 | --- | --- | --- |
@@ -52,7 +52,7 @@ Set these per environment under **Settings → Environments** (`staging` and `pr
 | `SUPABASE_PROJECT_REF` | variable | Project ref, e.g. `abcd1234efgh5678` |
 | `RENDER_DEPLOY_HOOK_BACKEND` | secret | Render deploy hook URL of the backend service |
 | `BACKEND_URL` | variable | Public URL of the backend, e.g. `https://engine-staging.onrender.com` |
-| `FRONTEND_DEPLOY_HOOK` | secret | Deploy or build hook of the frontend host (Render, Vercel, Netlify and Cloudflare Pages all provide one) |
+| `FRONTEND_DEPLOY_HOOK` | secret | Deploy or build hook of the frontend host |
 | `INTELLIGENCE_DEPLOY_HOOK` | secret | Deploy hook of the classifier service |
 
 [`render.yaml`](render.yaml) defines the two backend services (`engine-staging`, `engine`). Auto-deploy is off, so Render only deploys commits the pipeline sends.
