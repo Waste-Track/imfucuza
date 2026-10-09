@@ -19,7 +19,7 @@ A folder's workflow runs only when that folder changes:
 
 | Workflow | Runs |
 | --- | --- |
-| [`backend.yml`](.github/workflows/backend.yml) | `ruff check`, `ruff format --check`, `pytest`. Applies every migration to a fresh local Supabase database, lints the schema, and fails if any `public` table lacks row-level security. |
+| [`backend.yml`](.github/workflows/backend.yml) | `ruff check` and `ruff format --check`. Applies every migration to a fresh local Supabase database, lints the schema, fails if any table lacks row-level security or the `engine` schema is reachable through the Data API, then runs `pytest` against that database. |
 | [`frontend.yml`](.github/workflows/frontend.yml) | Installs with the lockfile's package manager, then runs the `lint`, `typecheck`, `test` and `build` scripts that exist in `package.json`. |
 | [`intelligence.yml`](.github/workflows/intelligence.yml) | Installs from `pyproject.toml` or `requirements.txt`, then runs `ruff check` and `pytest`. |
 
