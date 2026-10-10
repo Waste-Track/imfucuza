@@ -112,7 +112,11 @@ jobs:
   deploy-staging:
     name: Deploy to staging
     needs: [changes, ci-ok]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # always() is needed: without it, any skipped job upstream of ci-ok
+    # (a folder that didn't change) would skip the deploy as well.
+    if: >-
+      always() && needs.ci-ok.result == 'success' && needs.changes.result == 'success'
+      && github.event_name == 'push' && github.ref == 'refs/heads/main'
     uses: ./.github/workflows/deploy.yml
     with:
       environment: staging
