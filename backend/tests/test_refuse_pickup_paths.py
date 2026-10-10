@@ -5,11 +5,18 @@ from tests.flow import HOME, offset
 
 
 def _expire(world, kind: str) -> None:
+    """Let a timer's moment pass: make its job due, and backdate what it checks."""
+    if kind == "offer.expire":
+        world.db.run(
+            "update engine.dispatch_offers set expires_at = now() - interval '1 second'"
+            " where response is null"
+        )
+    if kind == "pin.expire":
+        world.db.run(
+            "update engine.pins set expires_at = now() - interval '1 second'"
+            " where status in ('active', 'locked')"
+        )
     world.make_due(kind)
-    world.db.run(
-        "update engine.dispatch_offers set expires_at = now() - interval '1 second'"
-        " where response is null"
-    ) if kind == "offer.expire" else None
     world.tick()
 
 
