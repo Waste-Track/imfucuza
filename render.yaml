@@ -17,26 +17,6 @@ services:
       - key: UV_PYTHON_PREFERENCE
         value: only-system
       - key: ENVIRONMENT
-        value: production
-      - key: PAYMENT_PROVIDER
-        value: paystack
-      - key: SMS_GATEWAY
-        value: mnotify
-      - key: DATABASE_URL
-        sync: false
-      - key: SUPABASE_URL
-        sync: false
-      - key: INTERNAL_SECRET
-        sync: false
-      - key: PIN_PEPPER
-        sync: false
-      - key: PAYSTACK_SECRET_KEY
-        sync: false
-      - key: MNOTIFY_API_KEY
-        sync: false
-      - key: SUPABASE_SMS_HOOK_SECRET
-        sync: false
-      - key: ENVIRONMENT
         value: staging
       - key: PAYMENT_PROVIDER
         value: paystack
@@ -56,6 +36,12 @@ services:
         sync: false
       - key: SUPABASE_SMS_HOOK_SECRET
         sync: false
+      - key: USSD_PROVIDER
+        sync: false
+      - key: USSD_WEBHOOK_TOKEN
+        sync: false
+      - key: USSD_CODE
+        sync: false
 
   - type: web
     name: engine
@@ -73,3 +59,29 @@ services:
         value: 3.12.11
       - key: UV_PYTHON_PREFERENCE
         value: only-system
+      - key: ENVIRONMENT
+        value: production
+      - key: PAYMENT_PROVIDER
+        value: paystack
+      - key: SMS_GATEWAY
+        value: mnotify
+      - key: DATABASE_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: INTERNAL_SECRET
+        sync: false
+      - key: PIN_PEPPER
+        sync: false
+      - key: PAYSTACK_SECRET_KEY
+        sync: false
+      - key: MNOTIFY_API_KEY
+        sync: false
+      - key: SUPABASE_SMS_HOOK_SECRET
+        sync: false
+      - key: USSD_PROVIDER
+        sync: false
+      - key: USSD_WEBHOOK_TOKEN
+        sync: false
+      - key: USSD_CODE
+        sync: false
