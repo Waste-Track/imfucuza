@@ -6,15 +6,27 @@ from uuid import UUID
 from app import jobs
 from app.config import get_settings
 from app.db import Conn
-from app.domain import dispatch, events, notify, payments, pickups
+from app.domain import dispatch, events, notify, payments, pickups, review
 from app.domain.pickups import Event, Offering, Status
 
 # A rider's current jobs: busy ones, plus those waiting for the household's PIN.
 ACTIVE_FOR_RIDER = (*dispatch.ACTIVE_JOB_STATUSES, Status.AWAITING_PIN)
 
+# A self-reported arrival can't beat a tricycle at about 18 km/h, capped at 15 min.
+RIDER_SPEED_M_S = 5
+MAX_TRIP_S = 15 * 60
+# Arrived but not collected after this long: ask a supervisor.
+ARRIVAL_TIMEOUT = timedelta(minutes=45)
+
 
 class NotYourPickup(LookupError):
     pass
+
+
+class TooSoon(Exception):
+    def __init__(self, seconds_left: int) -> None:
+        super().__init__(f"you can't have arrived yet: try again in {seconds_left // 60 + 1} min")
+        self.seconds_left = seconds_left
 
 
 class TooFarAway(Exception):
@@ -117,7 +129,7 @@ async def arrive(
     distance = round(dispatch.haversine_m(pickup["lat"], pickup["lng"], fix.lat, fix.lng))
     if distance > get_settings().arrival_radius_m + (fix.accuracy_m or 0):
         raise TooFarAway(distance)
-    return await pickups.apply(
+    result = await pickups.apply(
         conn,
         pickup_id,
         Event.RIDER_ARRIVED,
@@ -127,6 +139,93 @@ async def arrive(
         changes={"arrived_at": pickups.NOW},
         payload={"distance_m": distance},
     )
+    await _watch_arrival(conn, pickup_id, result.version)
+    return result
+
+
+async def arrive_self_reported(
+    conn: Conn, pickup_id: UUID, *, rider_id: UUID, user_id: UUID
+) -> pickups.Transitioned:
+    """A feature-phone rider has no GPS, so arrival is their word. It can't come
+    sooner than the trip could take, and the household is told so it can object."""
+    pickup = await assigned_to(conn, pickup_id, rider_id)
+    cur = await conn.execute(
+        """
+        select r.channel,
+               greatest(0, least(%s, o.distance_m / %s)
+                   - extract(epoch from now() - o.responded_at))::int as seconds_left
+          from engine.riders r
+          join engine.dispatch_offers o
+            on o.rider_id = r.id and o.pickup_id = %s and o.response = 'accepted'
+         where r.id = %s
+         order by o.responded_at desc limit 1
+        """,
+        (MAX_TRIP_S, RIDER_SPEED_M_S, pickup_id, rider_id),
+    )
+    trip = await cur.fetchone()
+    if trip is None or trip["channel"] != "ussd":
+        raise dispatch.SelfReportNotAllowed("app riders mark arrival from the app, by GPS")
+    if trip["seconds_left"] > 0:
+        raise TooSoon(trip["seconds_left"])
+
+    result = await pickups.apply(
+        conn,
+        pickup_id,
+        Event.RIDER_ARRIVED,
+        expected_version=pickup["version"],
+        actor_type="rider",
+        actor_id=user_id,
+        changes={"arrived_at": pickups.NOW},
+        payload={"self_reported": True},
+    )
+    # The rider is now where the pickup is: place them there for the next dispatch.
+    await conn.execute(
+        """
+        insert into engine.rider_locations (rider_id, source, lat, lng, pickup_id, reported_at)
+        values (%s, 'arrival', %s, %s, %s, now())
+        """,
+        (rider_id, pickup["lat"], pickup["lng"], pickup_id),
+    )
+    cur = await conn.execute(
+        "select user_id from engine.households where id = %s", (pickup["household_id"],)
+    )
+    code = get_settings().ussd_code or "the Imfucuza code"
+    await notify.queue_sms(
+        conn,
+        user_id=(await cur.fetchone())["user_id"],
+        pickup_id=pickup_id,
+        template="rider_arrived",
+        text=f"Imfucuza: your rider says they have arrived. Not there? Dial {code}, choose 2.",
+    )
+    await _watch_arrival(conn, pickup_id, result.version)
+    return result
+
+
+async def _watch_arrival(conn: Conn, pickup_id: UUID, version: int) -> None:
+    await jobs.enqueue(
+        conn,
+        "arrival.check",
+        {"pickup_id": str(pickup_id), "version": version},
+        run_at=datetime.now(UTC) + ARRIVAL_TIMEOUT,
+        dedupe_key=f"arrival-check:{pickup_id}:{version}",
+    )
+
+
+@jobs.handler("arrival.check")
+async def _arrival_check(conn: Conn, payload: dict) -> None:
+    """Arrived but never collected: the household's money is held, so a person looks."""
+    cur = await conn.execute(
+        "select status, version from engine.pickup_requests where id = %s",
+        (payload["pickup_id"],),
+    )
+    pickup = await cur.fetchone()
+    if pickup["status"] == Status.ARRIVED and pickup["version"] == payload["version"]:
+        await review.open_item(
+            conn,
+            "dispatch_stalled",
+            pickup_id=UUID(payload["pickup_id"]),
+            payload={"reason": "arrived but not collected"},
+        )
 
 
 async def collected(

@@ -35,11 +35,18 @@ Environment variables, read by `app/config.py`. With `ENVIRONMENT=local` (the de
 | `PAYMENT_PROVIDER`, `PAYSTACK_SECRET_KEY` | `paystack` and its secret key (test key on staging) |
 | `SMS_GATEWAY`, `MNOTIFY_API_KEY` | `mnotify` and its API key. `SMS_SENDER_ID` defaults to `Imfucuza` |
 | `SUPABASE_SMS_HOOK_SECRET` | The `v1,whsec_...` secret of the Auth "Send SMS" hook |
+| `USSD_PROVIDER`, `USSD_WEBHOOK_TOKEN`, `USSD_CODE` | Optional. The one USSD provider accepted (`africastalking`, `arkesel` or `mnotify`), the 32+ character secret it calls at `POST /webhooks/ussd/{provider}/{token}`, and the code shown in SMS. USSD is off until all three are set |
+| `USSD_ALLOWED_IPS`, `TRUST_FORWARDED_FOR` | Optional. Addresses the USSD provider calls from, and whether to read the caller from `X-Forwarded-For` (true behind Render) |
 
 Supabase Auth settings the Engine relies on, locally in `supabase/config.toml` and on each hosted project:
 
 - Phone sign-up on, with **phone confirmations on**. Accounts are linked by the token's phone claim, which is only safe once Supabase has confirmed the number.
 - Send SMS hook pointing at `POST /hooks/supabase/send-sms`, so sign-in codes go out through mNotify.
+
+USSD notes:
+
+- The mNotify USSD format comes from its spec alone and is untested: confirm session ids and the new-session signal in a sandbox before choosing it.
+- Feature-phone riders pick their location from zones and landmarks. `supabase/seed.sql` loads sample ones locally only. Hosted databases need surveyed zones and landmarks added before USSD riders can be dispatched.
 
 ## Layout
 
@@ -52,6 +59,7 @@ Supabase Auth settings the Engine relies on, locally in `supabase/config.toml` a
 | `app/domain/payments.py`, `money.py` | Collections, escrow and refunds |
 | `app/domain/dispatch.py` | Nearest-rider offers, expiry and re-dispatch |
 | `app/domain/pins.py` | Confirmation PINs |
+| `app/domain/ussd.py` | USSD menus for feature-phone riders and households |
 | `app/adapters/` | Paystack and mNotify, plus in-memory fakes |
 | `app/api/` | Routes for households, riders, supervisors and providers |
 | `app/auth.py` | Supabase access-token verification |

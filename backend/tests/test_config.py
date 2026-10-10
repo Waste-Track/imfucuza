@@ -41,3 +41,15 @@ def test_deployed_engine_refuses_fake_providers():
             internal_secret=SecretStr("cron-secret"),
             pin_pepper=SecretStr("a-long-random-pepper"),
         ).check_deployable()
+
+
+def test_deployed_ussd_needs_a_long_token_and_a_code():
+    with pytest.raises(RuntimeError) as exc:
+        Settings(
+            environment="staging",
+            ussd_provider="africastalking",
+            ussd_webhook_token=SecretStr("short"),
+        ).check_deployable()
+
+    assert "USSD_WEBHOOK_TOKEN (32+ characters)" in str(exc.value)
+    assert "USSD_CODE" in str(exc.value)

@@ -20,6 +20,7 @@ from app.config import get_settings
 from tests.helpers import LOCAL_HOSTS
 
 TICK_SECRET = "test-tick-secret"
+USSD_TOKEN = "test-ussd-path-token"
 CONSENT = "2026-10-v1"
 # Madina, Accra.
 HOME = (5.6837, -0.1657)
@@ -179,6 +180,28 @@ class World:
     def webhook(self, kind: PaymentEventKind, reference: str):
         body, headers = FakePaymentProvider.webhook(kind, reference)
         return self.client.post("/webhooks/payments/fake", content=body, headers=headers)
+
+    def ussd(self, actor: Actor, *inputs: str, provider: str = "africastalking") -> list[str]:
+        """Dial and press keys, as one session. Returns every screen, prefixed
+        CON or END as Africa's Talking shows them."""
+        session_id = f"ATUid_{uuid4().hex}"
+        screens = []
+        for i in range(len(inputs) + 1):
+            response = self.client.post(
+                f"/webhooks/ussd/{provider}/{USSD_TOKEN}",
+                data={
+                    "sessionId": session_id,
+                    "serviceCode": "*384*123#",
+                    "phoneNumber": actor.phone,
+                    "networkCode": "62001",
+                    "text": "*".join(inputs[:i]),
+                },
+            )
+            assert response.status_code == 200, response.text
+            screens.append(response.text)
+            if response.text.startswith("END"):
+                break
+        return screens
 
     def refund_settles(self, refund_id: str, state: RefundState = RefundState.SUCCEEDED) -> None:
         body, headers = self.payments.refund_outcome(refund_id, state)

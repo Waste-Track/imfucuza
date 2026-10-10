@@ -34,6 +34,16 @@ class Settings(BaseSettings):
     # Placeholder payer emails for providers that require one: <user id>@<domain>.
     payer_email_domain: str = "payers.imfucuza.app"
 
+    # USSD. The one provider whose callbacks are accepted ("" disables USSD),
+    # the secret path segment it calls, and the code shown in SMS.
+    ussd_provider: str = ""
+    ussd_webhook_token: SecretStr = SecretStr("")
+    ussd_code: str = ""
+    # Optional addresses the provider calls from (CIDRs). Empty accepts any.
+    ussd_allowed_ips: list[str] = []
+    # Behind a proxy (Render), the caller is the last X-Forwarded-For entry.
+    trust_forwarded_for: bool = False
+
     # Version of the consent notice households and riders must accept (Act 843).
     consent_version: str = "2026-10-v1"
     # Supabase Auth "Send SMS" hook secret, "v1,whsec_...". Empty disables the hook.
@@ -84,6 +94,11 @@ class Settings(BaseSettings):
             missing.append("MNOTIFY_API_KEY")
         if not self.supabase_sms_hook_secret.get_secret_value():
             missing.append("SUPABASE_SMS_HOOK_SECRET")
+        if self.ussd_provider:
+            if len(self.ussd_webhook_token.get_secret_value()) < 32:
+                missing.append("USSD_WEBHOOK_TOKEN (32+ characters)")
+            if not self.ussd_code:
+                missing.append("USSD_CODE")
         if missing:
             raise RuntimeError(f"{self.environment}: set {', '.join(missing)}")
 

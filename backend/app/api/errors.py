@@ -6,9 +6,14 @@ from fastapi.responses import JSONResponse
 from psycopg import errors as pg
 
 from app.adapters.base import ProviderError
-from app.domain.dispatch import OfferNotAvailable, OfferNotFound
+from app.domain.dispatch import (
+    OfferNotAvailable,
+    OfferNotFound,
+    SelfReportNotAllowed,
+    TooManyLocationChanges,
+)
 from app.domain.payments import PaymentNotAllowed
-from app.domain.pickup_flow import NotYourPickup, TooFarAway
+from app.domain.pickup_flow import NotYourPickup, TooFarAway, TooSoon
 from app.domain.pickups import InvalidTransition, StaleVersion
 from app.domain.pins import PinLocked, PinUnavailable, TooManyAttempts
 
@@ -23,6 +28,9 @@ _STATUS: list[tuple[type[Exception], int]] = [
     (PinLocked, 423),
     (TooManyAttempts, 429),
     (TooFarAway, 422),
+    (TooSoon, 422),
+    (SelfReportNotAllowed, 403),
+    (TooManyLocationChanges, 429),
     (ProviderError, 502),
     # Two requests raced for the same rows. The loser can simply try again.
     (pg.DeadlockDetected, 409),

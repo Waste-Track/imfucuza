@@ -18,7 +18,12 @@ from app.domain.pickups import Event, Status
 ACTIVE_JOB_STATUSES = ("assigned", "arrived", "location_issue", "verifying", "rider_review")
 
 # How far off a location might be, by how it was reported.
-UNCERTAINTY_M = {"gps": 0, "landmark": 300, "zone": 800}
+UNCERTAINTY_M = {"gps": 0, "landmark": 300, "arrival": 300, "zone": 800}
+
+# The rider-menu option for job offers, quoted in offer SMS.
+USSD_OFFER_OPTION = "3"
+# Self-reported location changes a rider may make in an hour (threat model T9).
+SELF_REPORTS_PER_HOUR = 6
 
 MAX_MISSED_OFFERS = 3
 UNREACHABLE_FOR = timedelta(minutes=30)
@@ -29,6 +34,14 @@ class OfferNotAvailable(Exception):
 
 
 class OfferNotFound(LookupError):
+    pass
+
+
+class SelfReportNotAllowed(Exception):
+    """App riders are located by GPS only, so they can't claim a place by menu."""
+
+
+class TooManyLocationChanges(Exception):
     pass
 
 
@@ -63,12 +76,15 @@ async def ranked_candidates(
         """
         -- A fix's age is the older of when it was taken and when it reached us:
         -- a rider can neither backdate a stale fix nor upload an old one as new.
+        -- App riders count only by GPS, so a menu self-report can't move them.
         with latest as (
-            select distinct on (rider_id) rider_id, lat, lng, source,
-                   least(reported_at, received_at) as taken_at
-              from engine.rider_locations
-             where received_at > now() - make_interval(secs => %(self_fresh)s)
-             order by rider_id, received_at desc, reported_at desc
+            select distinct on (l.rider_id) l.rider_id, l.lat, l.lng, l.source,
+                   least(l.reported_at, l.received_at) as taken_at
+              from engine.rider_locations l
+              join engine.riders lr on lr.id = l.rider_id
+             where l.received_at > now() - make_interval(secs => %(self_fresh)s)
+               and (l.source = 'gps' or lr.channel = 'ussd')
+             order by l.rider_id, l.received_at desc, l.reported_at desc
         )
         select r.id as rider_id, r.user_id, r.channel, l.lat, l.lng, l.source,
                extract(epoch from now() - l.taken_at)::int as location_age_s,
@@ -189,6 +205,10 @@ async def dispatch_next(conn: Conn, payload: dict) -> None:
         dedupe_key=f"offer-expire:{offer['id']}",
     )
     earning = pickup["fee_pesewas"] * settings.rider_share_percent // 100
+    if best.channel == "ussd":
+        how = f"Dial {settings.ussd_code or 'the Imfucuza code'}, choose {USSD_OFFER_OPTION}"
+    else:
+        how = "Accept in the app"
     await notify.queue_sms(
         conn,
         user_id=best.user_id,
@@ -197,7 +217,7 @@ async def dispatch_next(conn: Conn, payload: dict) -> None:
         template="offer",
         text=(
             f"Imfucuza job: refuse pickup {best.distance_m / 1000:.1f} km away, "
-            f"you earn GHS {earning / 100:.2f}. Accept in the app within {ttl // 60 or 1} min."
+            f"you earn GHS {earning / 100:.2f}. {how} within {ttl // 60 or 1} min."
         ),
     )
 
@@ -394,6 +414,42 @@ async def record_locations(conn: Conn, rider_id: UUID, fixes: list[LocationFix])
         await events.record(
             conn, "gps.anomaly", actor_type="system", payload={"rider_id": str(rider_id)}
         )
+
+
+async def record_self_report(
+    conn: Conn, rider_id: UUID, *, source: str, lat: float, lng: float
+) -> None:
+    """A location chosen from the zone or landmark menu, for riders without GPS.
+    Capped and logged: a rider who keeps claiming a busy spot shows up."""
+    cur = await conn.execute(
+        """
+        select r.channel, r.user_id,
+               (select count(*) from engine.rider_locations l
+                 where l.rider_id = r.id and l.source in ('landmark', 'zone')
+                   and l.received_at > now() - interval '1 hour') as recent
+          from engine.riders r where r.id = %s
+        """,
+        (rider_id,),
+    )
+    rider = await cur.fetchone()
+    if rider["channel"] != "ussd":
+        raise SelfReportNotAllowed("app riders share their location by GPS")
+    if rider["recent"] >= SELF_REPORTS_PER_HOUR:
+        raise TooManyLocationChanges("too many location changes in the last hour")
+    await events.record(
+        conn,
+        "rider.location_self_reported",
+        actor_type="rider",
+        actor_id=rider["user_id"],
+        payload={"rider_id": str(rider_id), "source": source},
+    )
+    await conn.execute(
+        """
+        insert into engine.rider_locations (rider_id, source, lat, lng, reported_at)
+        values (%s, %s, %s, %s, now())
+        """,
+        (rider_id, source, lat, lng),
+    )
 
 
 async def _lock_offer(conn: Conn, offer_id: UUID) -> dict | None:
