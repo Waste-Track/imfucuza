@@ -69,6 +69,11 @@ class Settings(BaseSettings):
     pin_ttl_s: int = 24 * 60 * 60
     pin_max_attempts: int = 5
 
+    # Rider earnings stay unpaid this long after release, so a dispute can still
+    # reach them. Payouts to one rider above the limit in a day need a second supervisor.
+    payout_hold_s: int = 48 * 60 * 60
+    payout_second_approval_pesewas: int = 20000
+
     def check_deployable(self) -> None:
         """Refuse to start a deployed Engine that would silently do nothing:
         without the internal secret no timers run, so holds are never refunded."""
