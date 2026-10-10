@@ -20,12 +20,15 @@ import psycopg
 from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
+from app.adapters.base import ProviderError
 from app.db import Conn
 from app.domain import events
 
 log = logging.getLogger(__name__)
 
 Handler = Callable[[Conn, dict[str, Any]], Awaitable[None]]
+# Called in the same transaction when a job fails for good, with its payload and error.
+GiveUp = Callable[[Conn, dict[str, Any], str], Awaitable[None]]
 
 JOB_TIMEOUT_S = 30.0
 TICK_BUDGET_S = 10.0
@@ -33,13 +36,16 @@ TICK_BUDGET_S = 10.0
 LEASE = timedelta(minutes=2)
 
 _handlers: dict[str, Handler] = {}
+_give_up_hooks: dict[str, GiveUp] = {}
 
 
-def handler(kind: str) -> Callable[[Handler], Handler]:
+def handler(kind: str, *, on_give_up: GiveUp | None = None) -> Callable[[Handler], Handler]:
     def register(fn: Handler) -> Handler:
         if kind in _handlers:
             raise RuntimeError(f"job kind {kind!r} already has a handler")
         _handlers[kind] = fn
+        if on_give_up:
+            _give_up_hooks[kind] = on_give_up
         return fn
 
     return register
@@ -150,7 +156,9 @@ async def _work(pool: AsyncConnectionPool[Conn], job: dict[str, Any], timeout_s:
                     await conn.execute("set constraints all immediate")
             except Exception as exc:
                 error = describe(exc)
-                if job["attempts"] >= job["max_attempts"]:
+                # A provider that refused for good would refuse every retry too.
+                permanent = isinstance(exc, ProviderError) and not exc.retryable
+                if permanent or job["attempts"] >= job["max_attempts"]:
                     await _give_up(conn, job, error)
                     return "failed"
                 log.warning(
@@ -215,6 +223,8 @@ async def _give_up(conn: Conn, job: dict[str, Any], error: str) -> None:
         actor_type="system",
         payload={"job_id": job["id"], "kind": job["kind"], "attempts": job["attempts"]},
     )
+    if hook := _give_up_hooks.get(job["kind"]):
+        await hook(conn, job["payload"], error)
 
 
 def describe(exc: BaseException) -> str:

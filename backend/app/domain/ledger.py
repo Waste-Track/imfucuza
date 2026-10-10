@@ -34,7 +34,8 @@ class AccountType:
     owned: bool = False
 
 
-PROVIDER_CLEARING = AccountType("provider_clearing", Unit.GHS, Side.DEBIT)
+# May go below zero: a refund returns the full amount but the provider keeps its fee.
+PROVIDER_CLEARING = AccountType("provider_clearing", Unit.GHS, Side.DEBIT, allow_negative=True)
 PROVIDER_FEE_EXPENSE = AccountType("provider_fee_expense", Unit.GHS, Side.DEBIT)
 ESCROW = AccountType("escrow:pickup", Unit.GHS, Side.CREDIT, owned=True)
 RIDER_PAYABLE = AccountType("rider_payable", Unit.GHS, Side.CREDIT, owned=True)

@@ -162,9 +162,21 @@ TERMINAL = frozenset(
 
 # Pickup columns a transition may set alongside the status.
 _UPDATABLE = frozenset(
-    {"assigned_rider_id", "verification_outcome", "weight_g", "failure_reason", "completed_at"}
+    {
+        "assigned_rider_id",
+        "verification_outcome",
+        "weight_g",
+        "failure_reason",
+        "paid_at",
+        "first_offered_at",
+        "assigned_at",
+        "arrived_at",
+        "collected_at",
+        "completed_at",
+    }
 )
-_NOW = object()
+# Pass as a `changes` value to set a timestamp column to the database's now().
+NOW = object()
 
 
 def initial_status(offering: Offering) -> Status:
@@ -243,12 +255,12 @@ async def apply(
         current = Status(row["status"])
         target = next_status(Offering(row["offering"]), current, event)
         if target is Status.COMPLETED:
-            extra.setdefault("completed_at", _NOW)
+            extra.setdefault("completed_at", NOW)
 
         assignments = [sql.SQL("status = %(status)s, version = version + 1, updated_at = now()")]
         params: dict[str, Any] = {"status": target, "id": pickup_id}
         for column, value in extra.items():
-            if value is _NOW:
+            if value is NOW:
                 assignments.append(sql.SQL("{} = now()").format(sql.Identifier(column)))
             else:
                 assignments.append(
