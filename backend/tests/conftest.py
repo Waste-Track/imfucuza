@@ -26,9 +26,11 @@ def world(monkeypatch):
     from app.auth import current_principal
     from app.config import get_settings
     from app.main import app
-    from tests.flow import TICK_SECRET, Db, World, principal_from_headers
+    from tests.flow import TICK_SECRET, USSD_TOKEN, Db, World, principal_from_headers
 
     monkeypatch.setenv("INTERNAL_SECRET", TICK_SECRET)
+    monkeypatch.setenv("USSD_WEBHOOK_TOKEN", USSD_TOKEN)
+    monkeypatch.setenv("USSD_PROVIDER", "africastalking")
     get_settings.cache_clear()
     fakes = services.Services(payments=FakePaymentProvider(), sms=FakeSmsGateway())
     services.install(fakes)
