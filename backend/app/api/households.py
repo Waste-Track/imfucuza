@@ -13,7 +13,7 @@ from app.api.common import PinEntry, pin_response
 from app.api.deps import HouseholdBriefDep, HouseholdDep, PrincipalDep
 from app.config import get_settings
 from app.db import ConnDep
-from app.domain import payments, people, pickup_flow, pins, plastic, rewards
+from app.domain import complaints, payments, people, pickup_flow, pins, plastic, rewards
 from app.domain.pickups import Offering
 
 router = APIRouter(prefix="/v1", tags=["households"])
@@ -398,3 +398,24 @@ async def leaderboard(
     if board is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="no zone found for this household")
     return board
+
+
+class Complaint(BaseModel):
+    details: str = Field(min_length=3, max_length=500)
+
+
+@router.post("/pickups/{pickup_id}/complaints", status_code=201)
+async def complain(
+    pickup_id: UUID, body: Complaint, conn: ConnDep, household: HouseholdDep
+) -> dict:
+    """Before the PIN this disputes the pickup and holds the money until a
+    supervisor decides. Afterwards it asks a supervisor to look into it."""
+    disputed = await complaints.open_complaint(
+        conn,
+        pickup_id,
+        household_id=household.household_id,
+        user_id=household.user.id,
+        details=body.details,
+        channel="pwa",
+    )
+    return {"status": "disputed" if disputed else "received"}

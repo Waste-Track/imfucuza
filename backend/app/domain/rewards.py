@@ -26,7 +26,7 @@ LEADERBOARD_SIZE = 10
 # Names that would pass as the service or its staff.
 _RESERVED_NAMES = {"imfucuza", "supervisor", "admin", "rider", "support"}
 # What counts towards a rank: points earned. Spending them doesn't lower it.
-_EARNING_KINDS = ["points_accrue", "points_release"]
+_EARNING_KINDS = ["points_accrue", "points_release", "points_retro_grant"]
 
 
 class NotEnoughPoints(Exception):

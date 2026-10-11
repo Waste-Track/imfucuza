@@ -184,10 +184,17 @@ async def resolve(conn: Conn, item_id: UUID, supervisor_id: UUID, resolution: st
         found
         and found["type"] == "manual_verification"
         and found["verification_outcome"] == "manual_review"
-        and found["pickup_status"] in (Status.AWAITING_PIN, Status.COMPLETED)
+        and found["pickup_status"] in (Status.AWAITING_PIN, Status.DISPUTED, Status.COMPLETED)
     ):
         # Closing it here would leave the points pending and the rider unpaid.
         raise ReviewItemUnavailable("decide on the plastic first, with its verification check")
+    if (
+        found
+        and found["type"] == "household_complaint"
+        and found["pickup_status"] == Status.DISPUTED
+    ):
+        # The money is held until the dispute is decided, so it can't just be closed.
+        raise ReviewItemUnavailable("decide the dispute first: reissue the PIN or refund")
     cur = await conn.execute(
         """
         update engine.review_items
@@ -216,9 +223,14 @@ async def resolve(conn: Conn, item_id: UUID, supervisor_id: UUID, resolution: st
 # Stepping into a pickup ----------------------------------------------------------
 
 
-async def reissue_pin(conn: Conn, pickup_id: UUID, supervisor_id: UUID) -> None:
-    """The only way to clear a locked PIN. The household gets a new one by SMS."""
+async def reissue_pin(
+    conn: Conn, pickup_id: UUID, supervisor_id: UUID, *, settles_dispute: bool = False
+) -> None:
+    """The only way to clear a locked PIN. The household gets a new one by SMS.
+    A disputed pickup is reissued only as the answer to its complaint."""
     pickup = await _pickup(conn, pickup_id)
+    if pickup["status"] == Status.DISPUTED and not settles_dispute:
+        raise pickups.InvalidTransition("decide the dispute through the household's complaint")
     cur = await conn.execute(
         """
         select (select count(*) from engine.pins where pickup_id = %(id)s) as issued,
@@ -230,7 +242,7 @@ async def reissue_pin(conn: Conn, pickup_id: UUID, supervisor_id: UUID) -> None:
     )
     sent = await cur.fetchone()
     if sent["issued"] >= MAX_PINS_WITH_SUPERVISOR:
-        raise pins.TooManyAttempts("no more PINs can be sent for this pickup: cancel it instead")
+        raise pins.TooManyAttempts("no more PINs can be sent for this pickup")
     if pickup["status"] == Status.DISPUTED:
         await pickups.apply(
             conn,

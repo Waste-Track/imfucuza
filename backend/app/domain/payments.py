@@ -256,6 +256,13 @@ async def start_refund(conn: Conn, pickup_id: UUID) -> bool:
     )
     household_id = (await cur.fetchone())["household_id"]
     await ledger.post(conn, money.refund_due(pickup_id, household_id, held))
+    await refund_collections(conn, pickup_id)
+    return True
+
+
+async def refund_collections(conn: Conn, pickup_id: UUID) -> None:
+    """Hand every payment for the pickup back through the provider. The ledger
+    entry that owes the household must already be posted."""
     cur = await conn.execute(
         """
         select reference from engine.payments
@@ -263,9 +270,29 @@ async def start_refund(conn: Conn, pickup_id: UUID) -> bool:
         """,
         (pickup_id,),
     )
-    for row in await cur.fetchall():
-        await _queue_refund(conn, row["reference"])
-    return True
+    await queue_refunds(conn, [row["reference"] for row in await cur.fetchall()])
+
+
+async def unrefunded_collections(conn: Conn, pickup_id: UUID) -> list[dict]:
+    """Payments for the pickup that no refund has been started for, such as
+    the fee itself once it was released."""
+    cur = await conn.execute(
+        """
+        select c.reference, c.amount_pesewas from engine.payments c
+         where c.pickup_id = %s and c.direction = 'collection' and c.status = 'succeeded'
+           and not exists (select 1 from engine.payments r
+                            where r.direction = 'refund' and r.reference = c.reference)
+           and not exists (select 1 from engine.jobs j
+                            where j.dedupe_key = 'refund:' || c.reference)
+        """,
+        (pickup_id,),
+    )
+    return await cur.fetchall()
+
+
+async def queue_refunds(conn: Conn, references: list[str]) -> None:
+    for reference in references:
+        await _queue_refund(conn, reference)
 
 
 async def _queue_refund(conn: Conn, reference: str) -> None:

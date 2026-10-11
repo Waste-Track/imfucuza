@@ -65,6 +65,13 @@ class Settings(BaseSettings):
     plastic_pickups_per_day: int = Field(2, gt=0)
     # How long a rider has to decide on plastic the classifier was unsure about.
     rider_review_s: int = Field(10 * 60, gt=0)
+    # Complaints. How long after a pickup a household can complain, when an
+    # undecided dispute is raised again, and how much one supervisor can refund
+    # or grant back in a day before a second must approve (threat model T15).
+    complaint_window_days: int = Field(7, gt=0)
+    dispute_escalate_s: int = Field(48 * 60 * 60, gt=0)
+    complaint_refund_daily_pesewas: int = Field(5000, ge=0)
+    complaint_points_daily: int = Field(500, ge=0)
     # Rewards. How long a voucher can be used for, and the version of the notice
     # households accept before their name appears on the leaderboard.
     voucher_valid_days: int = Field(30, gt=0)

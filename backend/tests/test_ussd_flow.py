@@ -213,17 +213,23 @@ def test_location_changes_are_capped(world):
 # Household -------------------------------------------------------------------
 
 
-def test_reporting_a_problem_flags_it_without_freezing_the_pickup(world):
+def test_reporting_a_problem_before_the_pin_disputes_the_pickup(world):
     household = world.household()
     rider = world.ussd_rider()
     pickup_id = world.paid_pickup(household)
     accept_arrive_collect(world, rider)
+    pin = world.pin_sent_to(household)
 
     screens = world.ussd(household, "2", "1")
+    rider_tries = world.ussd(rider, "6", pin)[-1]
 
     assert screens[1].startswith("CON Report a problem")
-    assert screens[-1].startswith("END Reported. Don't give your PIN")
-    assert world.status(pickup_id) == "awaiting_pin"
+    assert (
+        screens[-1]
+        == "END Reported. Your PIN is cancelled and payment held. A supervisor will call."
+    )
+    assert world.status(pickup_id) == "disputed"
+    assert rider_tries == "END No pickup is waiting for a PIN."
     assert (
         world.db.one("select type from engine.review_items where pickup_id = %s", pickup_id)["type"]
         == "household_complaint"

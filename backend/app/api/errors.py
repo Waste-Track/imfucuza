@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse
 from psycopg import errors as pg
 
 from app.adapters.base import ProviderError
+from app.domain.complaints import ComplaintNotAllowed, OutcomeNotAllowed
 from app.domain.dispatch import (
     OfferNotAvailable,
     OfferNotFound,
@@ -47,6 +48,8 @@ _STATUS: list[tuple[type[Exception], int]] = [
     (ProductUnavailable, 409),
     (TooManyVouchers, 409),
     (NameTaken, 409),
+    (ComplaintNotAllowed, 409),
+    (OutcomeNotAllowed, 409),
     (ProviderError, 502),
     # Two requests raced for the same rows. The loser can simply try again.
     (pg.DeadlockDetected, 409),

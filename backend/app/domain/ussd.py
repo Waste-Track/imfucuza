@@ -21,6 +21,7 @@ from app.adapters.ussd_base import UssdReply, UssdRequest
 from app.config import get_settings
 from app.db import Conn
 from app.domain import (
+    complaints,
     dispatch,
     events,
     notify,
@@ -28,7 +29,6 @@ from app.domain import (
     pickup_flow,
     pins,
     plastic,
-    review,
     rewards,
 )
 from app.domain.pickups import InvalidTransition, StaleVersion, Status
@@ -552,11 +552,14 @@ async def _household_home(conn: Conn, session: Session, choice: str) -> Step:
         latest = await _latest_pickup(conn, session.user_id)
         if latest is None or not latest["recent"]:
             return finish("You have no recent pickup to report.")
-        return show(
-            "Report a problem with your pickup? A supervisor will call you.\n1 Yes, report\n0 Back",
-            "household_report",
-            pickup_id=str(latest["id"]),
+        prompt = (
+            "Report a problem? Your PIN will be cancelled and the payment held until a "
+            "supervisor decides.\n1 Yes, report\n0 Back"
+            if latest["status"] == Status.AWAITING_PIN
+            else "Report a problem with your pickup? A supervisor will call you."
+            "\n1 Yes, report\n0 Back"
         )
+        return show(prompt, "household_report", pickup_id=str(latest["id"]))
     if choice == "3":
         latest = await _latest_pickup(conn, session.user_id)
         if latest is None:
@@ -581,21 +584,24 @@ async def _household_pin(conn: Conn, session: Session, choice: str) -> Step:
 
 
 async def _household_report(conn: Conn, session: Session, choice: str) -> Step:
-    """A report only flags the pickup for a supervisor. It changes nothing, so it
-    can't strand money: without a PIN the rider isn't paid, and an unconfirmed
-    pickup is refunded after a day."""
+    """Before the PIN, a report disputes the pickup, so a rider who has the PIN
+    can't use it. The money is held until a supervisor decides."""
     if choice != "1":
         return await _home(conn, session)
     pickup = await _own_pickup(conn, session.user_id, UUID(session.context["pickup_id"]))
-    await review.open_item(
-        conn,
-        "household_complaint",
-        pickup_id=pickup["id"],
-        household_id=pickup["household_id"],
-        payload={"reason": "reported by USSD"},
-    )
-    if pickup["status"] == Status.AWAITING_PIN:
-        return finish("Reported. Don't give your PIN until it's sorted. A supervisor will call.")
+    try:
+        disputed = await complaints.open_complaint(
+            conn,
+            pickup["id"],
+            household_id=pickup["household_id"],
+            user_id=session.user_id,
+            details="reported by USSD",
+            channel="ussd",
+        )
+    except complaints.ComplaintNotAllowed as exc:
+        return finish(f"{str(exc).capitalize()}.")
+    if disputed:
+        return finish("Reported. Your PIN is cancelled and payment held. A supervisor will call.")
     return finish("Reported. A supervisor will call you.")
 
 

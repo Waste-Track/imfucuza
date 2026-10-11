@@ -4,6 +4,7 @@ from uuid import UUID
 
 from app.domain.ledger import (
     ESCROW,
+    PLATFORM_ADJUSTMENTS,
     PLATFORM_REVENUE,
     POINTS_AVAILABLE,
     POINTS_ISSUED,
@@ -158,4 +159,31 @@ def voucher_void(voucher_id: UUID, household_id: UUID, points: int) -> Posting:
             debit(Account(POINTS_REDEEMED), points),
             credit(Account(POINTS_AVAILABLE, household_id), points),
         ),
+    )
+
+
+def dispute_refund(pickup_id: UUID, household_id: UUID, amount: int) -> Posting:
+    """A completed pickup refunded after a complaint. Escrow was released, so
+    the platform pays and the rider keeps their share."""
+    return Posting(
+        "dispute_refund",
+        f"dref:{pickup_id}",
+        (
+            debit(Account(PLATFORM_ADJUSTMENTS), amount),
+            credit(Account(REFUND_PAYABLE, household_id), amount),
+        ),
+        pickup_id=pickup_id,
+    )
+
+
+def points_retro_grant(pickup_id: UUID, household_id: UUID, points: int) -> Posting:
+    """Points for plastic whose rejection a supervisor overturned."""
+    return Posting(
+        "points_retro_grant",
+        f"retro:{pickup_id}",
+        (
+            debit(Account(POINTS_ISSUED), points),
+            credit(Account(POINTS_AVAILABLE, household_id), points),
+        ),
+        pickup_id=pickup_id,
     )
