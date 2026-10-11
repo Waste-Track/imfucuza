@@ -6,7 +6,7 @@ from uuid import UUID, uuid4
 import pytest
 
 from app.config import get_settings
-from tests.flow import CONSENT, HOME, Actor, offset
+from tests.flow import HOME, Actor, offset
 
 
 def rider_id(world, rider: Actor) -> UUID:
@@ -15,17 +15,6 @@ def rider_id(world, rider: Actor) -> UUID:
         " where u.phone_e164 = %s",
         rider.phone,
     )["id"]
-
-
-def ussd_rider(world) -> Actor:
-    rider = Actor()
-    response = world.client.post(
-        "/v1/admin/riders",
-        headers=world.supervisor().headers,
-        json={"phone": rider.phone, "name": "Yaw", "channel": "ussd", "consent_version": CONSENT},
-    )
-    assert response.status_code == 201, response.text
-    return rider
 
 
 def lock_the_pin(world, household: Actor, pickup_id: UUID, pin: str) -> None:
@@ -353,7 +342,7 @@ def test_feature_phone_rider_assigned_from_afar_gets_details_and_must_travel(wor
     household = world.household()
     pickup_id = world.paid_pickup(household)
     assert world.status(pickup_id) == "pending_dispatch"
-    rider = ussd_rider(world)
+    rider = world.ussd_rider(ready=False)
 
     response = world.client.post(
         f"/v1/admin/pickups/{pickup_id}/assign",
@@ -410,7 +399,7 @@ def test_no_show_rider_can_be_swapped_for_a_chosen_one(world):
 def test_rider_swapped_out_before_the_sms_goes_never_gets_the_household_number(world):
     household = world.household()
     pickup_id = world.paid_pickup(household)
-    first, second = ussd_rider(world), ussd_rider(world)
+    first, second = world.ussd_rider(ready=False), world.ussd_rider(ready=False)
     supervisor = world.supervisor()
 
     for rider in (first, second):

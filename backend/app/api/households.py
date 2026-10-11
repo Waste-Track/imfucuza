@@ -2,13 +2,13 @@ from datetime import datetime
 from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Header, HTTPException, Request, status
+from fastapi import APIRouter, Header, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
 from psycopg import errors
 from pydantic import BaseModel, Field
 
 from app.adapters.base import Network
-from app.api import idempotency
+from app.api import idempotency, uploads
 from app.api.common import PinEntry, pin_response
 from app.api.deps import HouseholdBriefDep, HouseholdDep, PrincipalDep
 from app.config import get_settings
@@ -77,8 +77,21 @@ class PickupView(BaseModel):
     weight_g: int | None
     points_due: int | None
     verification_outcome: str
+    # The rider has weighed the plastic and, on a basic phone, needs the
+    # household to send the photo.
+    photo_wanted: bool
     requested_at: datetime
     completed_at: datetime | None
+
+
+_VIEW = """
+    p.id, p.offering, p.status, p.fee_pesewas, p.declared_type, p.weight_g, p.points_due,
+    p.verification_outcome, p.requested_at, p.completed_at,
+    (p.offering = 'plastic' and p.status = 'arrived' and p.weight_g is not null
+     and coalesce(r.channel = 'ussd', false)) as photo_wanted
+    from engine.pickup_requests p
+    left join engine.riders r on r.id = p.assigned_rider_id
+"""
 
 
 @router.post("/pickups", status_code=201)
@@ -117,11 +130,11 @@ async def request_pickup(
 async def my_pickups(conn: ConnDep, household: HouseholdDep) -> list[PickupView]:
     cur = await conn.execute(
         """
-        select id, offering, status, fee_pesewas, declared_type, weight_g, points_due,
-               verification_outcome, requested_at, completed_at
-          from engine.pickup_requests
-         where household_id = %s
-         order by requested_at desc limit 50
+        select """
+        + _VIEW
+        + """
+         where p.household_id = %s
+         order by p.requested_at desc limit 50
         """,
         (household.household_id,),
     )
@@ -225,9 +238,10 @@ async def confirm(
 async def _view(conn: ConnDep, pickup_id: UUID, household_id: UUID) -> PickupView:
     cur = await conn.execute(
         """
-        select id, offering, status, fee_pesewas, declared_type, weight_g, points_due,
-               verification_outcome, requested_at, completed_at
-          from engine.pickup_requests where id = %s and household_id = %s
+        select """
+        + _VIEW
+        + """
+         where p.id = %s and p.household_id = %s
         """,
         (pickup_id, household_id),
     )
@@ -246,3 +260,30 @@ class Points(BaseModel):
 @router.get("/points/me")
 async def my_points(conn: ConnDep, household: HouseholdDep) -> Points:
     return Points(**await plastic.balance(conn, household.household_id))
+
+
+@router.post("/pickups/{pickup_id}/plastic/photo")
+async def send_plastic_photo(
+    pickup_id: UUID,
+    request: Request,
+    household: HouseholdBriefDep,
+    weight_g: Annotated[int, Query(gt=0, description="The weight the app showed the household")],
+) -> dict:
+    """When the rider has a basic phone, the household photographs the plastic
+    once it has been weighed. The photo is the request body."""
+    pool = request.app.state.pool
+    async with pool.connection() as conn, conn.transaction():
+        await plastic.expect_household_photo(conn, pickup_id, household.household_id, weight_g)
+    photo = await uploads.store(request, pickup_id)
+    async with uploads.kept_if_recorded(photo), pool.connection() as conn, conn.transaction():
+        result = await plastic.submit_from_household(
+            conn,
+            pickup_id,
+            household_id=household.household_id,
+            user_id=household.user.id,
+            photo_id=photo.id,
+            storage_key=photo.storage_key,
+            photo=photo.prepared,
+            weight_g=weight_g,
+        )
+    return {"status": result.status}

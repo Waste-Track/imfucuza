@@ -56,6 +56,8 @@ class Event(StrEnum):
     LOCATION_ISSUE_ABANDONED = "location_issue_abandoned"
     REFUSE_COLLECTED = "refuse_collected"
     WRONG_MATERIAL = "wrong_material"
+    # A feature-phone rider's weight, before the household sends the photo.
+    WEIGHT_ENTERED = "weight_entered"
     PHOTO_SUBMITTED = "photo_submitted"
     PHOTO_UNREADABLE = "photo_unreadable"
     VERIFICATION_ACCEPTED = "verification_accepted"
@@ -111,6 +113,7 @@ _RULES: list[tuple[tuple[Status, ...], Event, Status, frozenset[Offering]]] = [
     ((Status.LOCATION_ISSUE,), Event.LOCATION_ISSUE_ABANDONED, Status.FAILED, BOTH),
     ((Status.ARRIVED,), Event.REFUSE_COLLECTED, Status.AWAITING_PIN, REFUSE),
     ((Status.ARRIVED,), Event.WRONG_MATERIAL, Status.FAILED, REFUSE),
+    ((Status.ARRIVED,), Event.WEIGHT_ENTERED, Status.ARRIVED, PLASTIC),
     ((Status.ARRIVED,), Event.PHOTO_SUBMITTED, Status.VERIFYING, PLASTIC),
     ((Status.VERIFYING,), Event.PHOTO_UNREADABLE, Status.ARRIVED, PLASTIC),
     ((Status.VERIFYING,), Event.VERIFICATION_ACCEPTED, Status.AWAITING_PIN, PLASTIC),

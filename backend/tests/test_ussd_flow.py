@@ -4,37 +4,12 @@ import logging
 from uuid import uuid4
 
 from app.domain.ussd import NOT_REGISTERED
-from tests.flow import CONSENT, HOME, USSD_TOKEN, Actor, offset
-
-MARKET_SQUARE = ("1", "1")  # zone 1, landmark 1 in seed.sql, about 100 m from HOME
-
-
-def ussd_rider(world) -> Actor:
-    rider = Actor()
-    response = world.client.post(
-        "/v1/admin/riders",
-        headers=world.supervisor().headers,
-        json={"phone": rider.phone, "name": "Yaw", "channel": "ussd", "consent_version": CONSENT},
-    )
-    assert response.status_code == 201, response.text
-    assert world.ussd(rider, "1")[-1].startswith("END You are on duty")
-    assert world.ussd(rider, "2", *MARKET_SQUARE)[-1] == (
-        "END Location saved: Market square. Update it when you move."
-    )
-    return rider
-
-
-def travel(world) -> None:
-    """Pretend the ride to the household took long enough."""
-    world.db.run(
-        "update engine.dispatch_offers set responded_at = now() - interval '20 minutes'"
-        " where response = 'accepted'"
-    )
+from tests.flow import HOME, MARKET_SQUARE, USSD_TOKEN, Actor, offset
 
 
 def accept_arrive_collect(world, rider: Actor) -> None:
     assert world.ussd(rider, "3", "1")[-1].startswith("END Accepted")
-    travel(world)
+    world.travel()
     assert world.ussd(rider, "4")[-1].startswith("END Marked as arrived")
     assert world.ussd(rider, "5")[-1].startswith("END Collected")
     world.tick()
@@ -56,7 +31,7 @@ def pin_attempts(world, pickup_id) -> int:
 def test_feature_phone_pickup_end_to_end(world, caplog):
     caplog.set_level(logging.WARNING)
     household = world.household()
-    rider = ussd_rider(world)
+    rider = world.ussd_rider()
     pickup_id = world.paid_pickup(household)
 
     offer_sms = world.sms.messages_to(rider.phone)[-1]
@@ -69,7 +44,7 @@ def test_feature_phone_pickup_end_to_end(world, caplog):
     details = world.sms.messages_to(rider.phone)[-1]
     assert household.phone in details
     assert "near Market square" in details
-    travel(world)
+    world.travel()
     world.ussd(rider, "4")
     world.tick()
     assert any("says they have arrived" in t for t in world.sms.messages_to(household.phone))
@@ -93,7 +68,7 @@ def test_feature_phone_pickup_end_to_end(world, caplog):
 
 def test_job_details_are_stored_with_the_number_masked(world):
     household = world.household()
-    rider = ussd_rider(world)
+    rider = world.ussd_rider()
     pickup_id = world.paid_pickup(household)
 
     world.ussd(rider, "3", "1")
@@ -111,7 +86,7 @@ def test_job_details_are_stored_with_the_number_masked(world):
 
 def test_rider_can_enter_the_household_pin_by_ussd(world):
     household = world.household()
-    rider = ussd_rider(world)
+    rider = world.ussd_rider()
     pickup_id = world.paid_pickup(household)
     accept_arrive_collect(world, rider)
 
@@ -123,7 +98,7 @@ def test_rider_can_enter_the_household_pin_by_ussd(world):
 
 def test_older_pickup_waiting_for_a_pin_stays_reachable(world):
     first, second = world.household(), world.household(offset(HOME, 50))
-    rider = ussd_rider(world)
+    rider = world.ussd_rider()
     first_pickup = world.paid_pickup(first)
     accept_arrive_collect(world, rider)
     world.paid_pickup(second)
@@ -140,7 +115,7 @@ def test_older_pickup_waiting_for_a_pin_stays_reachable(world):
 
 def test_wrong_pin_by_ussd_counts_as_a_try(world):
     household = world.household()
-    rider = ussd_rider(world)
+    rider = world.ussd_rider()
     pickup_id = world.paid_pickup(household)
     accept_arrive_collect(world, rider)
     pin = world.pin_sent_to(household)
@@ -153,7 +128,7 @@ def test_wrong_pin_by_ussd_counts_as_a_try(world):
 
 def test_short_pin_is_asked_again_without_using_a_try(world):
     household = world.household()
-    rider = ussd_rider(world)
+    rider = world.ussd_rider()
     pickup_id = world.paid_pickup(household)
     accept_arrive_collect(world, rider)
 
@@ -164,7 +139,7 @@ def test_short_pin_is_asked_again_without_using_a_try(world):
 
 
 def test_resent_step_is_answered_again_not_applied_twice(world):
-    rider = ussd_rider(world)
+    rider = world.ussd_rider()
     session = {
         "sessionId": f"ATUid_{uuid4().hex}",
         "serviceCode": "*384*123#",
@@ -188,7 +163,7 @@ def test_resent_step_is_answered_again_not_applied_twice(world):
 
 def test_arriving_sooner_than_the_trip_allows_is_refused(world):
     household = world.household()
-    rider = ussd_rider(world)
+    rider = world.ussd_rider()
     pickup_id = world.paid_pickup(household)
     world.ussd(rider, "3", "1")
 
@@ -200,10 +175,10 @@ def test_arriving_sooner_than_the_trip_allows_is_refused(world):
 
 def test_arrival_without_collection_is_flagged_for_a_supervisor(world):
     household = world.household()
-    rider = ussd_rider(world)
+    rider = world.ussd_rider()
     pickup_id = world.paid_pickup(household)
     world.ussd(rider, "3", "1")
-    travel(world)
+    world.travel()
     world.ussd(rider, "4")
 
     world.make_due("arrival.check")
@@ -226,7 +201,7 @@ def test_app_riders_cannot_self_report_location_or_arrival(world):
 
 
 def test_location_changes_are_capped(world):
-    rider = ussd_rider(world)
+    rider = world.ussd_rider()
     for _ in range(5):
         assert world.ussd(rider, "2", *MARKET_SQUARE)[-1].startswith("END Location saved")
 
@@ -240,7 +215,7 @@ def test_location_changes_are_capped(world):
 
 def test_reporting_a_problem_flags_it_without_freezing_the_pickup(world):
     household = world.household()
-    rider = ussd_rider(world)
+    rider = world.ussd_rider()
     pickup_id = world.paid_pickup(household)
     accept_arrive_collect(world, rider)
 
@@ -276,18 +251,18 @@ def test_household_can_check_its_last_pickup(world):
 
 
 def test_rider_with_no_offer_is_told_so(world):
-    rider = ussd_rider(world)
+    rider = world.ussd_rider()
 
     assert world.ussd(rider, "3")[-1] == "END No job offer right now."
 
 
 def test_invalid_choice_shows_the_menu_again(world):
-    assert world.ussd(world.household(), "9")[-1].startswith("CON Choose 1, 2 or 3.")
+    assert world.ussd(world.household(), "9")[-1].startswith("CON Choose 1 to 4.")
 
 
 def test_long_area_lists_are_paged_and_never_cut(world, caplog):
     caplog.set_level(logging.WARNING)
-    rider = ussd_rider(world)
+    rider = world.ussd_rider()
     names = [f"Ashaley Botwe New Town {i}" for i in range(12)]
     for i, name in enumerate(names):
         world.db.run(

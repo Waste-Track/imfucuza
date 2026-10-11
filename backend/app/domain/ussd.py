@@ -7,8 +7,10 @@ database: anything slower (SMS) goes through the job queue.
 """
 
 import logging
+import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
@@ -18,7 +20,7 @@ from app import jobs
 from app.adapters.ussd_base import UssdReply, UssdRequest
 from app.config import get_settings
 from app.db import Conn
-from app.domain import dispatch, events, notify, pickup_flow, pins, review
+from app.domain import dispatch, events, notify, people, pickup_flow, pins, plastic, review
 from app.domain.pickups import InvalidTransition, StaleVersion, Status
 
 log = logging.getLogger(__name__)
@@ -48,7 +50,9 @@ RIDER_HOME = "\n".join(
         "6 Household PIN",
     ]
 )
-HOUSEHOLD_HOME = "Imfucuza\n1 Confirm pickup with PIN\n2 Report a problem\n3 My last pickup"
+HOUSEHOLD_HOME = (
+    "Imfucuza\n1 Confirm pickup with PIN\n2 Report a problem\n3 My last pickup\n4 My points"
+)
 
 STATUS_WORDS = {
     Status.AWAITING_PAYMENT: "waiting for payment",
@@ -189,6 +193,8 @@ async def _answer(conn: Conn, session: Session, choice: str) -> Step:
         return finish("That job offer is no longer available.")
     except dispatch.TooManyLocationChanges:
         return finish("You have changed your location too often. Try again in an hour.")
+    except plastic.WeightOutOfRange as exc:
+        return finish(f"{str(exc).capitalize()}. Choose 5 to try again.")
     except pickup_flow.TooSoon as exc:
         minutes = exc.seconds_left // 60 + 1
         return finish(f"Arrived already? The trip takes longer. Try again in {minutes} min.")
@@ -254,11 +260,32 @@ async def _rider_home(conn: Conn, session: Session, choice: str) -> Step:
         )
         return finish("Marked as arrived. Collect the waste, then choose 5.")
     if choice == "5":
-        job = await _job_in(conn, rider["id"], Status.ARRIVED)
+        job = await _job_in(conn, rider["id"], Status.ARRIVED) or await _job_in(
+            conn, rider["id"], Status.RIDER_REVIEW
+        )
         if job is None:
+            if await _job_in(conn, rider["id"], Status.VERIFYING):
+                return finish("The photo is being checked. You will get an SMS.")
             return finish("Choose 4 when you arrive, then 5 once you have collected.")
-        await pickup_flow.collected(conn, job["id"], rider_id=rider["id"], user_id=session.user_id)
-        return finish("Collected. The household gets a PIN by SMS. Ask for it, then choose 6.")
+        if job["offering"] == "refuse":
+            await pickup_flow.collected(
+                conn, job["id"], rider_id=rider["id"], user_id=session.user_id
+            )
+            return finish("Collected. The household gets a PIN by SMS. Ask for it, then choose 6.")
+        if session.channel != "ussd":
+            return finish("Use the app for plastic: it sends the photo.")
+        if job["status"] == Status.RIDER_REVIEW:
+            return show(
+                "Check the plastic in front of you. Does it qualify?\n1 Accept it\n2 Reject it",
+                "rider_material",
+                pickup_id=str(job["id"]),
+            )
+        prompt = (
+            f"Saved: {plastic.kg(job['weight_g'])} kg. To change it, type the weight in kg:"
+            if job["weight_g"]
+            else "Weight of the plastic in kg, for example 4.2:"
+        )
+        return show(prompt, "rider_weight", pickup_id=str(job["id"]))
     if choice == "6":
         job = await _job_in(conn, rider["id"], Status.AWAITING_PIN)
         if job is None:
@@ -379,6 +406,72 @@ async def _answer_offer(conn: Conn, session: Session, choice: str) -> Step:
     return show("Choose 1 to accept or 2 to decline.", "offer", offer_id=str(offer_id))
 
 
+async def _rider_weight(conn: Conn, session: Session, choice: str) -> Step:
+    pickup_id = session.context["pickup_id"]
+    grams = _grams(choice)
+    if grams is None:
+        return show("Type the weight in kg, for example 4.2:", "rider_weight", pickup_id=pickup_id)
+    # The exact figure, since a stray key can't be seen once it's typed.
+    return show(
+        f"Save {plastic.kg(grams)} kg?\n1 Yes\n2 Change",
+        "rider_weight_confirm",
+        pickup_id=pickup_id,
+        grams=grams,
+    )
+
+
+async def _rider_weight_confirm(conn: Conn, session: Session, choice: str) -> Step:
+    pickup_id, grams = session.context["pickup_id"], session.context["grams"]
+    if choice == "2":
+        return show("Type the weight in kg, for example 4.2:", "rider_weight", pickup_id=pickup_id)
+    if choice != "1":
+        return show(
+            f"Save {plastic.kg(grams)} kg?\n1 Yes\n2 Change",
+            "rider_weight_confirm",
+            pickup_id=pickup_id,
+            grams=grams,
+        )
+    rider = await _rider(conn, session.user_id)
+    await plastic.enter_weight(
+        conn, UUID(pickup_id), rider_id=rider["id"], user_id=session.user_id, weight_g=grams
+    )
+    return finish(
+        f"Saved: {plastic.kg(grams)} kg. The household now takes a photo in the app. "
+        "You will get an SMS once it is checked."
+    )
+
+
+# Up to 999 kg with up to 3 decimals: nothing else reaches Decimal, so an
+# exponent like 9e999999 can't make the conversion run for seconds.
+_KG = re.compile(r"\d{1,3}(?:[.,]\d{1,3})?")
+
+
+def _grams(text: str) -> int | None:
+    """Kilograms as typed on a keypad, "4.2" or "4,2", in whole grams."""
+    text = text.strip()
+    if not _KG.fullmatch(text):
+        return None
+    grams = int(Decimal(text.replace(",", ".")) * 1000)
+    return grams or None
+
+
+async def _rider_material(conn: Conn, session: Session, choice: str) -> Step:
+    pickup_id = session.context["pickup_id"]
+    if choice not in ("1", "2"):
+        return show(
+            "Choose 1 to accept the plastic or 2 to reject it.",
+            "rider_material",
+            pickup_id=pickup_id,
+        )
+    rider = await _rider(conn, session.user_id)
+    outcome = await plastic.rider_decides(
+        conn, UUID(pickup_id), rider_id=rider["id"], user_id=session.user_id, accept=choice == "1"
+    )
+    if outcome == Status.REJECTED:
+        return finish("Rejected. Leave the plastic with the household.")
+    return finish("Thank you. Take the plastic, ask the household for the PIN, then choose 6.")
+
+
 async def _rider_pin(conn: Conn, session: Session, choice: str) -> Step:
     pickup_id = UUID(session.context["pickup_id"])
     rider = await _rider(conn, session.user_id)
@@ -413,7 +506,12 @@ async def _household_home(conn: Conn, session: Session, choice: str) -> Step:
         when = latest["requested_at"].strftime("%d %b")
         status = STATUS_WORDS.get(latest["status"], "in progress")
         return finish(f"Your pickup of {when}: {status}.")
-    return show("Choose 1, 2 or 3.\n" + HOUSEHOLD_HOME, "household_home")
+    if choice == "4":
+        household_id = await people.household_id_for(conn, session.user_id)
+        held = await plastic.balance(conn, household_id)
+        waiting = f" {held['pending']} more wait for a check." if held["pending"] else ""
+        return finish(f"You have {held['available']} points.{waiting}")
+    return show("Choose 1 to 4.\n" + HOUSEHOLD_HOME, "household_home")
 
 
 async def _household_pin(conn: Conn, session: Session, choice: str) -> Step:
@@ -536,7 +634,7 @@ async def _rider(conn: Conn, user_id: UUID) -> dict:
 async def _job_in(conn: Conn, rider_id: UUID, status: Status) -> dict | None:
     cur = await conn.execute(
         """
-        select id from engine.pickup_requests
+        select id, offering, status, weight_g from engine.pickup_requests
          where assigned_rider_id = %s and status = %s
          order by assigned_at limit 1
         """,
@@ -628,6 +726,9 @@ _SCREENS: dict[str, Handler] = {
     "pick_landmark": _pick_landmark,
     "offer": _answer_offer,
     "rider_pin": _rider_pin,
+    "rider_weight": _rider_weight,
+    "rider_weight_confirm": _rider_weight_confirm,
+    "rider_material": _rider_material,
     "household_home": _household_home,
     "household_pin": _household_pin,
     "household_report": _household_report,

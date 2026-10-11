@@ -16,7 +16,7 @@ from app.adapters.base import (
 )
 from app.config import get_settings
 from app.domain import pickups, plastic
-from tests.flow import CONSENT, HOME, Actor, offset, photo
+from tests.flow import HOME, Actor, offset, photo
 
 
 def rider_id(world, rider: Actor) -> UUID:
@@ -160,41 +160,31 @@ def test_plastic_request_needs_a_type_and_an_eligible_household(world):
     assert paused.status_code == 403
 
 
-def test_plastic_needs_no_payment_and_is_offered_to_app_riders_only(world):
+def test_plastic_needs_no_payment_and_goes_to_the_nearest_rider_of_either_kind(world):
     household = world.household()
-    feature_phone = Actor()
-    world.client.post(
-        "/v1/admin/riders",
-        headers=world.supervisor().headers,
-        json={
-            "phone": feature_phone.phone,
-            "name": "Yaw",
-            "channel": "ussd",
-            "consent_version": CONSENT,
-        },
-    )
-    world.ussd(feature_phone, "1")
-    near = offset(HOME, 100)
-    world.db.run(
-        "insert into engine.rider_locations (rider_id, source, lat, lng, reported_at)"
-        " values (%s, 'landmark', %s, %s, now())",
-        rider_id(world, feature_phone),
-        *near,
-    )
+    feature_phone = world.ussd_rider()
     app_rider = world.rider(offset(HOME, 900))
 
     pickup_id = world.plastic_pickup(household)
 
-    assert world.open_offer(app_rider)["pickup_id"] == str(pickup_id)
-    assert world.open_offer(app_rider)["pay_per_kg_pesewas"] == 100
-    assert "you earn GHS 1.00 per kg" in world.sms.messages_to(app_rider.phone)[-1]
-    assert (
-        world.db.one(
-            "select count(*) as n from engine.dispatch_offers where rider_id = %s",
-            rider_id(world, feature_phone),
-        )["n"]
-        == 0
+    offer = world.db.one(
+        "select rider_id from engine.dispatch_offers where pickup_id = %s and response is null",
+        pickup_id,
     )
+    assert offer["rider_id"] == rider_id(world, feature_phone)
+    assert "you earn GHS 1.00 per kg" in world.sms.messages_to(feature_phone.phone)[-1]
+    assert world.client.get("/v1/riders/me/offers", headers=app_rider.headers).json() == []
+
+
+def test_an_app_rider_sees_plastic_offers_with_pay_per_kg(world):
+    household, rider = world.household(), world.rider(offset(HOME, 300))
+
+    world.plastic_pickup(household)
+
+    offer = world.open_offer(rider)
+    assert offer["offering"] == "plastic"
+    assert offer["pay_per_kg_pesewas"] == 100
+    assert offer["earning_pesewas"] is None
 
 
 # The policy's outcomes -------------------------------------------------------------
@@ -567,7 +557,7 @@ def test_a_photo_whose_record_fails_is_deleted_again(world, monkeypatch):
     async def clash(*args, **kwargs):
         raise pickups.StaleVersion("someone else got there first")
 
-    monkeypatch.setattr(plastic, "submit", clash)
+    monkeypatch.setattr(plastic, "submit_from_rider", clash)
     response = world.submit_plastic(rider, pickup_id)
 
     assert response.status_code == 409
@@ -710,30 +700,6 @@ def test_a_check_claimed_by_someone_else_is_theirs_to_decide(world):
 
     assert theirs.status_code == 409
     assert mine.status_code == 200
-
-
-def test_plastic_cannot_be_assigned_to_a_feature_phone_rider(world):
-    household = world.household()
-    pickup_id = world.plastic_pickup(household)
-    feature_phone = Actor()
-    world.client.post(
-        "/v1/admin/riders",
-        headers=world.supervisor().headers,
-        json={
-            "phone": feature_phone.phone,
-            "name": "Yaw",
-            "channel": "ussd",
-            "consent_version": CONSENT,
-        },
-    )
-
-    response = world.client.post(
-        f"/v1/admin/pickups/{pickup_id}/assign",
-        headers=world.supervisor().headers,
-        json={"rider_id": str(rider_id(world, feature_phone))},
-    )
-
-    assert response.status_code == 409
 
 
 def test_an_app_rider_can_still_see_a_plastic_offer_on_ussd(world):
