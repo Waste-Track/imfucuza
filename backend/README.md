@@ -53,7 +53,7 @@ Supabase Auth settings the Engine relies on, locally in `supabase/config.toml` a
 
 Supabase Cron calls `POST /internal/tick` every 10 seconds, which runs every timer: offer expiry, refunds, PIN deadlines and queued SMS. Set it up once per hosted project:
 
-1. Check the Render plan. A ticked service never sleeps, and two always-on free services use more than Render's 750 free hours a month, so give production a paid instance before it gets its secrets.
+1. Check the Render plan. A ticked service never sleeps, and two always-on free services use more than Render's 750 free hours a month, so give production a paid instance before it gets its secrets. A staging service on the free plan can tick only part of the day: add a Vault secret `engine_tick_hours` set to `7-22` to tick from 07:00 to 21:59 Ghana time (UTC).
 2. On the dashboard's Vault page, add `engine_tick_url` (`https://<engine-host>/internal/tick`) and `engine_internal_secret` (the `INTERNAL_SECRET` value). Avoid the SQL editor for this: it keeps what you type as a saved snippet.
 3. Check the schedule with `select jobname, username, active from cron.job`: two jobs, both run as `postgres`.
 

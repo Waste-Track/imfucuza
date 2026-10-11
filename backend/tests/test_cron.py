@@ -1,13 +1,15 @@
 """Supabase Cron calling POST /internal/tick, checked inside the database.
 Every test rolls back, so no secret is left behind and no request is sent."""
 
+from datetime import UTC, datetime
+
 import pytest
 
 from tests.helpers import connect
 
 pytestmark = pytest.mark.anyio
 
-URL, SECRET = "engine_tick_url", "engine_internal_secret"
+URL, SECRET, HOURS = "engine_tick_url", "engine_internal_secret", "engine_tick_hours"
 
 
 async def schedule(name: str) -> dict:
@@ -78,7 +80,9 @@ async def tick_with_secrets(**secrets: str) -> dict | None:
     conn = await connect()
     try:
         async with conn.transaction(force_rollback=True):
-            await conn.execute("delete from vault.secrets where name in (%s, %s)", (URL, SECRET))
+            await conn.execute(
+                "delete from vault.secrets where name in (%s, %s, %s)", (URL, SECRET, HOURS)
+            )
             for name, value in secrets.items():
                 await conn.execute("select vault.create_secret(%s, %s)", (value, name))
             cur = await conn.execute("select engine.tick() as id")
@@ -111,3 +115,31 @@ async def test_tick_posts_to_the_engine_with_the_internal_secret():
     assert request["url"] == "https://engine.test/internal/tick"
     assert request["headers"]["x-internal-secret"] == "s3cret-for-this-test"
     assert request["timeout_milliseconds"] == 60000
+
+
+def _window(start: int, end: int) -> dict[str, str]:
+    return {
+        URL: "https://engine.test/internal/tick",
+        SECRET: "s3cret-for-this-test",
+        HOURS: f"{start}-{end}",
+    }
+
+
+async def test_outside_the_ticking_window_nothing_is_sent():
+    hour = datetime.now(UTC).hour
+    later = (hour + 1) % 24
+
+    assert await tick_with_secrets(**_window(later, later + 1)) is None
+
+
+async def test_inside_the_ticking_window_the_tick_is_sent():
+    hour = datetime.now(UTC).hour
+
+    assert (await tick_with_secrets(**_window(hour, hour + 1)))["method"] == "POST"
+
+
+@pytest.mark.parametrize("value", ["", "7 to 22", "seven-ten", "7-22-1"])
+async def test_a_malformed_window_ticks_around_the_clock(value):
+    secrets = {**_window(0, 0), HOURS: value}
+
+    assert (await tick_with_secrets(**secrets))["method"] == "POST"
