@@ -1,7 +1,7 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import SecretStr
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 LOCAL_DATABASE_URL = "postgresql://postgres:postgres@127.0.0.1:54322/postgres"
@@ -43,6 +43,20 @@ class Settings(BaseSettings):
     ussd_allowed_ips: list[str] = []
     # Behind a proxy (Render), the caller is the last X-Forwarded-For entry.
     trust_forwarded_for: bool = False
+
+    # Pickup photos: "supabase" keeps them in a private Storage bucket, read and
+    # written with the project's secret key (sb_secret_...).
+    photo_store: Literal["fake", "supabase"] = "fake"
+    supabase_secret_key: SecretStr = SecretStr("")
+    # The waste classifier. "none" sends every plastic pickup to a supervisor.
+    classifier: Literal["fake", "http", "none"] = "fake"
+    classifier_url: str = ""
+    classifier_token: SecretStr = SecretStr("")
+    # Decision policy (engine-design.md section 5). Starting values until pilot
+    # data calibrates them. Change the version whenever a threshold changes.
+    verification_policy_version: str = "2026-10-p1"
+    verify_accept_at: float = Field(0.90, gt=0, le=1)
+    verify_reject_at: float = Field(0.80, gt=0, le=1)
 
     # Version of the consent notice households and riders must accept (Act 843).
     consent_version: str = "2026-10-v1"
@@ -99,6 +113,16 @@ class Settings(BaseSettings):
             missing.append("MNOTIFY_API_KEY")
         if not self.supabase_sms_hook_secret.get_secret_value():
             missing.append("SUPABASE_SMS_HOOK_SECRET")
+        if self.photo_store != "supabase":
+            missing.append("PHOTO_STORE=supabase")
+        if not self.supabase_secret_key.get_secret_value():
+            missing.append("SUPABASE_SECRET_KEY")
+        if self.classifier == "fake":
+            missing.append("CLASSIFIER=http (or none)")
+        if self.classifier == "http" and not (
+            self.classifier_url.startswith("https://") and self.classifier_token.get_secret_value()
+        ):
+            missing.append("CLASSIFIER_URL (https) and CLASSIFIER_TOKEN")
         if self.ussd_provider:
             if len(self.ussd_webhook_token.get_secret_value()) < 32:
                 missing.append("USSD_WEBHOOK_TOKEN (32+ characters)")

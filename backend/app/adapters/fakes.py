@@ -10,6 +10,7 @@ from uuid import uuid4
 from app.adapters.base import (
     ChargeStarted,
     ChargeState,
+    Classification,
     DeliveryState,
     InvalidWebhook,
     MomoCharge,
@@ -19,7 +20,10 @@ from app.adapters.base import (
     RefundInfo,
     RefundState,
     SmsSent,
+    Verdict,
+    VerdictReason,
     VerifiedCharge,
+    VerifyRequest,
 )
 
 FAKE_WEBHOOK_SECRET = b"fake-payment-webhook-secret"
@@ -138,3 +142,43 @@ class FakeSmsGateway:
 
     def messages_to(self, phone: str) -> list[str]:
         return [text for to, text in self.outbox if to == phone]
+
+
+@dataclass
+class FakePhotoStore:
+    name: str = "fake"
+    objects: dict[str, tuple[bytes, str]] = field(default_factory=dict)
+
+    async def put(self, key: str, data: bytes, content_type: str) -> None:
+        self.objects[key] = (data, content_type)
+
+    async def signed_url(self, key: str, ttl_s: int) -> str:
+        if key not in self.objects:
+            raise ProviderError(f"fake photo store: no object {key}", retryable=False)
+        return f"https://photos.test/{key}?expires_in={ttl_s}"
+
+
+@dataclass
+class FakeClassifier:
+    """Accepts with high confidence unless told otherwise. Queue answers, or
+    exceptions to raise, with `answer` and `fail`."""
+
+    name: str = "fake"
+    requests: list[VerifyRequest] = field(default_factory=list)
+    queued: list[tuple[Verdict, float, VerdictReason] | Exception] = field(default_factory=list)
+
+    async def verify(self, request: VerifyRequest) -> Classification:
+        self.requests.append(request)
+        next_up = self.queued.pop(0) if self.queued else (Verdict.ACCEPT, 0.97, VerdictReason.OK)
+        if isinstance(next_up, Exception):
+            raise next_up
+        verdict, confidence, reason = next_up
+        return Classification(request.verification_id, verdict, confidence, reason, "fake-1", 5)
+
+    def answer(
+        self, verdict: Verdict, confidence: float, reason: VerdictReason = VerdictReason.OK
+    ) -> None:
+        self.queued.append((verdict, confidence, reason))
+
+    def fail(self, error: Exception) -> None:
+        self.queued.append(error)

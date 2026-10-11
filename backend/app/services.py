@@ -3,17 +3,27 @@
 Job handlers and routes call `get()`. Tests install fakes with `install()`.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
-from app.adapters.base import PaymentProvider, SmsGateway
-from app.adapters.fakes import FakePaymentProvider, FakeSmsGateway
+from app.adapters.base import Classifier, PaymentProvider, PhotoStore, SmsGateway
+from app.adapters.fakes import (
+    FakeClassifier,
+    FakePaymentProvider,
+    FakePhotoStore,
+    FakeSmsGateway,
+)
 from app.config import Settings
+
+# Created private by migration 20261014090000_pickup_photos_bucket.sql.
+PHOTO_BUCKET = "pickup-photos"
 
 
 @dataclass
 class Services:
     payments: PaymentProvider
     sms: SmsGateway
+    photos: PhotoStore = field(default_factory=FakePhotoStore)
+    classifier: Classifier = field(default_factory=FakeClassifier)
 
 
 _current: Services | None = None
@@ -37,7 +47,31 @@ def build(settings: Settings) -> Services:
         )
     else:
         sms = FakeSmsGateway()
-    return Services(payments=payments, sms=sms)
+
+    if settings.photo_store == "supabase":
+        from app.adapters.supabase_storage import SupabasePhotoStore
+
+        photos: PhotoStore = SupabasePhotoStore(
+            settings.supabase_url,
+            settings.supabase_secret_key.get_secret_value(),
+            PHOTO_BUCKET,
+        )
+    else:
+        photos = FakePhotoStore()
+
+    if settings.classifier == "http":
+        from app.adapters.classifier import HttpClassifier
+
+        classifier: Classifier = HttpClassifier(
+            settings.classifier_url, settings.classifier_token.get_secret_value()
+        )
+    elif settings.classifier == "none":
+        from app.adapters.classifier import NoClassifier
+
+        classifier = NoClassifier()
+    else:
+        classifier = FakeClassifier()
+    return Services(payments=payments, sms=sms, photos=photos, classifier=classifier)
 
 
 def ensure(settings: Settings) -> Services:

@@ -35,8 +35,11 @@ Environment variables, read by `app/config.py`. With `ENVIRONMENT=local` (the de
 | `PAYMENT_PROVIDER`, `PAYSTACK_SECRET_KEY` | `paystack` and its secret key (test key on staging) |
 | `SMS_GATEWAY`, `MNOTIFY_API_KEY` | `mnotify` and its API key. `SMS_SENDER_ID` defaults to `Imfucuza` |
 | `SUPABASE_SMS_HOOK_SECRET` | The `v1,whsec_...` secret of the Auth "Send SMS" hook |
+| `PHOTO_STORE`, `SUPABASE_SECRET_KEY` | `supabase` and the project's secret key (`sb_secret_...`), for the private `pickup-photos` bucket |
+| `CLASSIFIER`, `CLASSIFIER_URL`, `CLASSIFIER_TOKEN` | `http` with the classifier's base URL and token (contract in [`../spec/classifier-contract.md`](../spec/classifier-contract.md)), or `none` to send every plastic pickup to a supervisor |
 | `USSD_PROVIDER`, `USSD_WEBHOOK_TOKEN`, `USSD_CODE` | Optional. The one USSD provider accepted (`africastalking`, `arkesel` or `mnotify`), the 32+ character secret it calls at `POST /webhooks/ussd/{provider}/{token}`, and the code shown in SMS. USSD is off until all three are set |
 | `USSD_ALLOWED_IPS`, `TRUST_FORWARDED_FOR` | Optional. Addresses the USSD provider calls from, and whether to read the caller from `X-Forwarded-For` (true behind Render) |
+| `VERIFY_ACCEPT_AT`, `VERIFY_REJECT_AT`, `VERIFICATION_POLICY_VERSION` | Optional. Classifier confidence needed to accept (0.90) or reject (0.80). Change the version with the thresholds |
 | `PAYOUT_HOLD_S`, `PAYOUT_SECOND_APPROVAL_PESEWAS` | Optional. How long rider earnings wait for disputes (48 h), and the daily amount per rider above which a second supervisor approves a payout (GHS 200) |
 
 Supabase Auth settings the Engine relies on, locally in `supabase/config.toml` and on each hosted project:
@@ -75,8 +78,9 @@ Rider payouts are sent by hand over mobile money. A supervisor requests the payo
 | `app/domain/dispatch.py` | Nearest-rider offers, expiry and re-dispatch |
 | `app/domain/pins.py` | Confirmation PINs |
 | `app/domain/ussd.py` | USSD menus for feature-phone riders and households |
+| `app/domain/photos.py`, `verification.py` | Photo intake (EXIF stripped, fingerprinted) and the verification decision policy |
 | `app/domain/supervision.py` | Supervisor console: review queue, interventions, riders, payouts, zones |
-| `app/adapters/` | Paystack and mNotify, plus in-memory fakes |
+| `app/adapters/` | Paystack, mNotify, Supabase Storage and the classifier client, plus in-memory fakes |
 | `app/api/` | Routes for households, riders, supervisors and providers |
 | `app/auth.py` | Supabase access-token verification |
 | `supabase/migrations/` | Schema, ledger triggers, row-level security |
