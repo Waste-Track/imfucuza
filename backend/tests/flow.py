@@ -16,7 +16,7 @@ from PIL import Image
 from psycopg.conninfo import conninfo_to_dict
 from psycopg.rows import dict_row
 
-from app.adapters.base import PaymentEventKind, RefundState
+from app.adapters.base import MomoCharge, Network, PaymentEventKind, RefundState
 from app.adapters.fakes import (
     FakeClassifier,
     FakePaymentProvider,
@@ -231,6 +231,27 @@ class World:
         response = self.client.post("/webhooks/payments/fake", content=body, headers=headers)
         assert response.status_code == 200, response.text
         self.tick()
+
+    def extra_payment(self, pickup_id: UUID) -> str:
+        """A second payment that got past the one-pending-prompt guard, for
+        example a prompt approved after it was reported failed."""
+        reference = f"imf_{uuid4().hex}"
+        self.db.run(
+            """
+            insert into engine.payments
+                (pickup_id, direction, provider, reference, network, amount_pesewas)
+            values (%s, 'collection', 'fake', %s, 'mtn', 1000)
+            """,
+            pickup_id,
+            reference,
+        )
+        self.payments.charges[reference] = MomoCharge(
+            reference, 1000, "+233200000000", Network.MTN, "x@example.com"
+        )
+        self.payments.settle(reference)
+        self.webhook(PaymentEventKind.CHARGE_SUCCEEDED, reference)
+        self.tick()
+        return reference
 
     def paid_pickup(self, household: Actor) -> UUID:
         pickup_id = self.request_pickup(household)

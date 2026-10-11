@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field, field_validator
 from app.api.deps import SupervisorDep
 from app.config import get_settings
 from app.db import ConnDep
-from app.domain import people, plastic, rewards, supervision
+from app.domain import complaints, people, plastic, rewards, supervision
 
 router = APIRouter(prefix="/v1/admin", tags=["supervisor"])
 
@@ -444,3 +444,51 @@ async def clear_leaderboard_name(
         rewards.clear_leaderboard_name(conn, household_id, supervisor_id=supervisor.id),
         "household",
     )
+
+
+# Complaints ---------------------------------------------------------------------
+
+
+class ComplaintDecision(BaseModel):
+    outcome: complaints.Outcome
+    note: str = Field(min_length=3, max_length=500)
+
+
+@router.post("/pickups/{pickup_id}/complaint")
+async def decide_complaint(
+    pickup_id: UUID, body: ComplaintDecision, conn: ConnDep, supervisor: SupervisorDep
+) -> dict:
+    """Answer a household's complaint: reissue the PIN or refund a disputed
+    pickup, refund a completed one, grant points back for plastic wrongly
+    rejected, or dismiss. Costly outcomes past a daily total wait for approval."""
+    return await _found(
+        complaints.decide(
+            conn, pickup_id, supervisor_id=supervisor.id, outcome=body.outcome, note=body.note
+        )
+    )
+
+
+@router.get("/complaint-decisions")
+async def complaint_decisions(
+    conn: ConnDep,
+    supervisor: SupervisorDep,
+    status_: Literal["pending_approval", "applied", "rejected"] = Query(
+        "pending_approval", alias="status"
+    ),
+    limit: int = Query(50, ge=1, le=200),
+) -> list[dict]:
+    return await complaints.list_decisions(conn, status=status_, limit=limit)
+
+
+@router.post("/complaint-decisions/{decision_id}/approve", status_code=204)
+async def approve_complaint_decision(
+    decision_id: UUID, conn: ConnDep, supervisor: SupervisorDep
+) -> None:
+    await _found(complaints.approve(conn, decision_id, supervisor.id), "decision")
+
+
+@router.post("/complaint-decisions/{decision_id}/reject", status_code=204)
+async def reject_complaint_decision(
+    decision_id: UUID, conn: ConnDep, supervisor: SupervisorDep
+) -> None:
+    await _found(complaints.reject(conn, decision_id, supervisor.id), "decision")

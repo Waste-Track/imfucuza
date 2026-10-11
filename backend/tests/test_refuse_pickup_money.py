@@ -4,8 +4,6 @@ from uuid import UUID, uuid4
 
 from app.adapters.base import (
     ChargeState,
-    MomoCharge,
-    Network,
     PaymentEventKind,
     ProviderError,
     RefundState,
@@ -17,28 +15,6 @@ def household_id(world, pickup_id: UUID) -> UUID:
     return world.db.one("select household_id from engine.pickup_requests where id = %s", pickup_id)[
         "household_id"
     ]
-
-
-def second_successful_payment(world, pickup_id: UUID) -> str:
-    """A payment that got past the one-pending-prompt guard, for example a
-    prompt approved after it was reported failed."""
-    reference = f"imf_{uuid4().hex}"
-    world.db.run(
-        """
-        insert into engine.payments
-            (pickup_id, direction, provider, reference, network, amount_pesewas)
-        values (%s, 'collection', 'fake', %s, 'mtn', 1000)
-        """,
-        pickup_id,
-        reference,
-    )
-    world.payments.charges[reference] = MomoCharge(
-        reference, 1000, "+233200000000", Network.MTN, "x@example.com"
-    )
-    world.payments.settle(reference)
-    world.webhook(PaymentEventKind.CHARGE_SUCCEEDED, reference)
-    world.tick()
-    return reference
 
 
 def review_types(world, pickup_id: UUID) -> list[str]:
@@ -89,7 +65,7 @@ def test_paying_twice_for_a_live_pickup_refunds_the_extra_and_still_pays_the_rid
     rider = world.rider(offset(HOME, 300))
     pickup_id = world.paid_pickup(household)
 
-    extra = second_successful_payment(world, pickup_id)
+    extra = world.extra_payment(pickup_id)
 
     assert world.payments.refunds == [(extra, 1000)]
     assert world.balance(f"escrow:pickup:{pickup_id}") == 1000
@@ -110,7 +86,7 @@ def test_paying_again_after_a_cancelled_refund_refunds_that_payment_too(world):
     world.client.post(f"/v1/pickups/{pickup_id}/cancel", headers=household.headers)
     world.tick()
 
-    extra = second_successful_payment(world, pickup_id)
+    extra = world.extra_payment(pickup_id)
 
     assert [ref for ref, _ in world.payments.refunds][-1] == extra
     assert len(world.payments.refunds) == 2
@@ -127,7 +103,7 @@ def test_paying_again_after_completion_is_refunded(world):
         f"/v1/pickups/{pickup_id}/confirm", headers=household.headers, json={"pin": pin}
     )
 
-    extra = second_successful_payment(world, pickup_id)
+    extra = world.extra_payment(pickup_id)
 
     assert world.payments.refunds == [(extra, 1000)]
     assert world.balance(f"escrow:pickup:{pickup_id}") == 0
@@ -237,7 +213,7 @@ def test_each_distinct_money_problem_gets_its_own_review_item(world):
     pickup_id = world.paid_pickup(household)
     world.payments.failures["refund"] = ProviderError("already reversed", retryable=False)
 
-    second_successful_payment(world, pickup_id)
+    world.extra_payment(pickup_id)
 
     reasons = {
         r["reason"]
