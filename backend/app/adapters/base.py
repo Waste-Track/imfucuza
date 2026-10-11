@@ -1,4 +1,4 @@
-"""Interfaces the Engine uses to reach payment and SMS providers.
+"""Interfaces the Engine uses to reach payment, SMS, storage and classifier services.
 
 Domain code depends only on these types. Each provider adapter translates
 them to and from its own API, so providers can be swapped or faked in tests.
@@ -6,8 +6,10 @@ them to and from its own API, so providers can be swapped or faked in tests.
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import datetime
 from enum import StrEnum
 from typing import Protocol
+from uuid import UUID
 
 
 class ProviderError(Exception):
@@ -151,3 +153,73 @@ class SmsGateway(Protocol):
     async def send(self, to_e164: str, text: str) -> SmsSent: ...
 
     async def delivery_state(self, provider_message_id: str) -> DeliveryState: ...
+
+
+# Photos ------------------------------------------------------------------------
+
+
+class PhotoStore(Protocol):
+    """Private storage for pickup photos. Nothing in it is publicly readable."""
+
+    name: str
+
+    async def put(self, key: str, data: bytes, content_type: str) -> None: ...
+
+    async def signed_url(self, key: str, ttl_s: int) -> str:
+        """A short-lived URL the classifier can fetch the photo from."""
+        ...
+
+
+# Verification ------------------------------------------------------------------
+
+
+class Verdict(StrEnum):
+    ACCEPT = "accept"
+    REJECT = "reject"
+    UNCERTAIN = "uncertain"
+
+
+class VerdictReason(StrEnum):
+    OK = "ok"
+    CONTAMINATED = "contaminated"
+    WRONG_TYPE = "wrong_type"
+    DUPLICATE = "duplicate"
+
+
+@dataclass(frozen=True)
+class VerifyRequest:
+    """What crosses the learned-component boundary: no identity, phone,
+    location or payment data."""
+
+    verification_id: UUID
+    pickup_id: UUID
+    declared_type: str
+    photo_url: str
+    photo_sha256: str
+    captured_at: datetime
+    capture_source: str
+
+
+@dataclass(frozen=True)
+class Classification:
+    verification_id: UUID
+    verdict: Verdict
+    confidence: float
+    reason: VerdictReason
+    model_version: str
+    latency_ms: int
+
+
+class PhotoUnreadable(Exception):
+    """The classifier can't use the photo: take another."""
+
+
+class ClassifierUnavailable(Exception):
+    """No usable answer: down, timed out, or replied with something invalid.
+    The pickup goes to a person, never to an automatic accept or reject."""
+
+
+class Classifier(Protocol):
+    name: str
+
+    async def verify(self, request: VerifyRequest) -> Classification: ...
