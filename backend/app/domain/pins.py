@@ -102,13 +102,17 @@ async def issue(conn: Conn, payload: dict) -> None:
         (pickup_id,),
     )
     pin = generate_pin()
-    await conn.execute(
+    cur = await conn.execute(
         """
         insert into engine.pins (pickup_id, pin_hmac, expires_at)
         values (%s, %s, now() + make_interval(secs => %s))
+        returning id, expires_at
         """,
         (pickup_id, pin_hmac(pickup_id, pin), get_settings().pin_ttl_s),
     )
+    issued = await cur.fetchone()
+    # Each PIN gets its own deadline, so a resent PIN isn't cut short.
+    await _expire_at(conn, pickup_id, issued)
     fee = f"GHS {pickup['fee_pesewas'] / 100:.2f}" if pickup["fee_pesewas"] else "your points"
     text = (
         f"Imfucuza: your rider has collected your waste. Your PIN is {pin}. "
@@ -267,10 +271,44 @@ async def _complete(
         )
 
 
-@jobs.handler("pin.expire")
+async def _expire_at(conn: Conn, pickup_id: UUID, pin: dict) -> None:
+    await jobs.enqueue(
+        conn,
+        "pin.expire",
+        {"pickup_id": str(pickup_id)},
+        run_at=pin["expires_at"],
+        dedupe_key=f"pin-expire:{pickup_id}:{pin['id']}",
+    )
+
+
+async def _expire_gave_up(conn: Conn, payload: dict, error: str) -> None:
+    await review.open_item(
+        conn,
+        "pin_issue",
+        pickup_id=UUID(payload["pickup_id"]),
+        payload={"reason": "PIN expiry failed", "error": error},
+    )
+
+
+@jobs.handler("pin.expire", on_give_up=_expire_gave_up)
 async def _expire_job(conn: Conn, payload: dict) -> None:
     """Nobody confirmed in time: refund, and let a supervisor look into it."""
     pickup_id = UUID(payload["pickup_id"])
+    # Lock the PINs first, as confirm does, then look again in a new statement:
+    # that one sees a PIN a resend has just committed.
+    await conn.execute(
+        "select id from engine.pins where pickup_id = %s and status in ('active', 'locked')"
+        " for update",
+        (pickup_id,),
+    )
+    cur = await conn.execute(
+        """
+        select id, expires_at from engine.pins
+         where pickup_id = %s and status in ('active', 'locked') and expires_at > now()
+        """,
+        (pickup_id,),
+    )
+    live = await cur.fetchone()
     cur = await conn.execute(
         """
         select p.status, p.version, p.household_id, h.user_id
@@ -282,6 +320,10 @@ async def _expire_job(conn: Conn, payload: dict) -> None:
     )
     pickup = await cur.fetchone()
     if pickup["status"] != Status.AWAITING_PIN:
+        return
+    if live:
+        # A newer PIN is still valid. Make sure its own timer is there to end it.
+        await _expire_at(conn, pickup_id, live)
         return
     await conn.execute(
         """

@@ -153,8 +153,11 @@ async def register_rider(
     )
     user_id = (await cur.fetchone())["id"]
     cur = await conn.execute(
-        "insert into engine.riders (user_id, channel) values (%s, %s) returning id",
-        (user_id, channel),
+        """
+        insert into engine.riders (user_id, channel, payout_msisdn) values (%s, %s, %s)
+        returning id
+        """,
+        (user_id, channel, phone_e164),
     )
     rider_id = (await cur.fetchone())["id"]
     await events.record(

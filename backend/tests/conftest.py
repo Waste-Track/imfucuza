@@ -36,9 +36,18 @@ def world(monkeypatch):
     services.install(fakes)
     app.dependency_overrides[current_principal] = principal_from_headers
     db = Db()
-    # The database is shared between tests: start with an empty queue and
-    # nobody on duty, so earlier tests' jobs and riders don't interfere.
+    # The database is shared between tests: start with an empty queue, an
+    # empty review queue, no open payouts and nobody on duty, so earlier
+    # tests' leftovers don't interfere.
     db.run("delete from engine.jobs")
+    db.run(
+        "update engine.review_items set status = 'resolved', resolved_at = now(),"
+        " resolution = 'test cleanup' where status = 'open'"
+    )
+    db.run(
+        "update engine.payouts set status = 'rejected', rejection_reason = 'test cleanup',"
+        " decided_at = now() where status in ('pending_approval', 'approved')"
+    )
     db.run("update engine.riders set on_duty = false")
     try:
         with TestClient(app) as client:

@@ -287,3 +287,50 @@ def test_household_phone_is_hidden_once_the_rider_has_collected(world):
     assert during["household_phone"] == household.phone
     assert after_collection["household_phone"] is None
     assert world.client.get("/v1/riders/me/jobs", headers=rider.headers).json() == []
+
+
+def test_a_resent_pin_is_not_expired_by_the_first_pins_timer(world):
+    household = world.household()
+    rider = world.rider(offset(HOME, 300))
+    pickup_id = world.paid_pickup(household)
+    world.deliver_and_collect(household, rider, pickup_id)
+    world.client.post(f"/v1/pickups/{pickup_id}/pin/resend", headers=household.headers)
+    world.tick()
+
+    # The first PIN's 24-hour timer fires while the new PIN is still valid.
+    world.make_due("pin.expire")
+    world.tick()
+
+    assert world.status(pickup_id) == "awaiting_pin"
+    done = world.client.post(
+        f"/v1/pickups/{pickup_id}/confirm",
+        headers=household.headers,
+        json={"pin": world.pin_sent_to(household)},
+    )
+    assert done.json() == {"status": "completed"}
+
+
+def test_a_pin_without_its_own_timer_is_still_expired_on_time(world):
+    household = world.household()
+    rider = world.rider(offset(HOME, 300))
+    pickup_id = world.paid_pickup(household)
+    world.deliver_and_collect(household, rider, pickup_id)
+    world.client.post(f"/v1/pickups/{pickup_id}/pin/resend", headers=household.headers)
+    world.tick()
+    live = world.db.one(
+        "select id, expires_at from engine.pins where pickup_id = %s and status = 'active'",
+        pickup_id,
+    )
+    own_timer = f"pin-expire:{pickup_id}:{live['id']}"
+    # As if the PIN had been sent before PINs had timers of their own.
+    world.db.run("delete from engine.jobs where dedupe_key = %s", own_timer)
+
+    world.make_due("pin.expire")
+    world.tick()
+    timer = world.db.one("select run_at from engine.jobs where dedupe_key = %s", own_timer)
+    world.db.run("update engine.pins set expires_at = now() where id = %s", live["id"])
+    world.db.run("update engine.jobs set run_at = now() where dedupe_key = %s", own_timer)
+    world.tick()
+
+    assert timer["run_at"] == live["expires_at"]
+    assert world.status(pickup_id) == "unconfirmed"

@@ -323,6 +323,18 @@ async def withdraw_open_offer(conn: Conn, pickup_id: UUID) -> None:
     )
 
 
+async def withdraw_rider_offer(conn: Conn, rider_id: UUID) -> None:
+    """Take back the rider's open offer and offer the pickup to someone else."""
+    cur = await conn.execute(
+        "select id from engine.dispatch_offers where rider_id = %s and response is null",
+        (rider_id,),
+    )
+    found = await cur.fetchone()
+    offer = found and await _lock_offer(conn, found["id"])
+    if offer and offer["response"] is None:
+        await _release(conn, offer, "withdrawn", actor_type="supervisor")
+
+
 @jobs.handler("offer.expire")
 async def _expire_job(conn: Conn, payload: dict) -> None:
     offer = await _lock_offer(conn, UUID(payload["offer_id"]))

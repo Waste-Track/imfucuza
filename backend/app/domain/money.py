@@ -57,6 +57,18 @@ def refund_extra(pickup_id: UUID, household_id: UUID, reference: str, amount: in
     )
 
 
+def rider_payout(rider_id: UUID, momo_reference: str, amount: int) -> Posting:
+    """A rider was paid by hand over mobile money from our provider balance."""
+    return Posting(
+        "rider_payout",
+        f"payout:{momo_reference}",
+        (
+            debit(Account(RIDER_PAYABLE, rider_id), amount),
+            credit(Account(PROVIDER_CLEARING), amount),
+        ),
+    )
+
+
 def refund_paid(pickup_id: UUID, household_id: UUID, reference: str, amount: int) -> Posting:
     """The provider returned the full amount. Its original fee is not returned,
     so clearing can dip below zero: that is money we owe the provider."""

@@ -473,11 +473,13 @@ async def _job_details_sms(conn: Conn, payload: dict) -> None:
           join engine.households h on h.id = p.household_id
           join engine.users u on u.id = h.user_id
          where p.id = %s
+           and p.assigned_rider_id = (select id from engine.riders where user_id = %s)
         """,
-        (pickup_id,),
+        (pickup_id, payload["rider_user_id"]),
     )
     job = await cur.fetchone()
-    if job["status"] not in (Status.ASSIGNED, Status.ARRIVED):
+    # Only while the job is still theirs: a supervisor may have moved it.
+    if job is None or job["status"] not in (Status.ASSIGNED, Status.ARRIVED):
         return
     near = f"near {job['landmark']}" if job["landmark"] else "at the pickup point"
     where = f"{job['address_text']}, {near}" if job["address_text"] else near

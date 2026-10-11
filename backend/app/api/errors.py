@@ -16,6 +16,7 @@ from app.domain.payments import PaymentNotAllowed
 from app.domain.pickup_flow import NotYourPickup, TooFarAway, TooSoon
 from app.domain.pickups import InvalidTransition, StaleVersion
 from app.domain.pins import PinLocked, PinUnavailable, TooManyAttempts
+from app.domain.supervision import PayoutNotAllowed, ReviewItemUnavailable, RiderUnavailable
 
 _STATUS: list[tuple[type[Exception], int]] = [
     (NotYourPickup, 404),
@@ -31,6 +32,9 @@ _STATUS: list[tuple[type[Exception], int]] = [
     (TooSoon, 422),
     (SelfReportNotAllowed, 403),
     (TooManyLocationChanges, 429),
+    (ReviewItemUnavailable, 409),
+    (PayoutNotAllowed, 409),
+    (RiderUnavailable, 409),
     (ProviderError, 502),
     # Two requests raced for the same rows. The loser can simply try again.
     (pg.DeadlockDetected, 409),

@@ -224,7 +224,7 @@ async def _arrival_check(conn: Conn, payload: dict) -> None:
             conn,
             "dispatch_stalled",
             pickup_id=UUID(payload["pickup_id"]),
-            payload={"reason": "arrived but not collected"},
+            payload={"reason": "arrived but not collected", "pickup_version": pickup["version"]},
         )
 
 
@@ -248,6 +248,7 @@ async def collected(
         dedupe_key=f"pin-issue:{pickup_id}:{result.version}",
         max_attempts=10,
     )
+    # A fallback deadline in case no PIN is ever sent. Each PIN adds its own.
     await jobs.enqueue(
         conn,
         "pin.expire",

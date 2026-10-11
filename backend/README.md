@@ -37,6 +37,7 @@ Environment variables, read by `app/config.py`. With `ENVIRONMENT=local` (the de
 | `SUPABASE_SMS_HOOK_SECRET` | The `v1,whsec_...` secret of the Auth "Send SMS" hook |
 | `USSD_PROVIDER`, `USSD_WEBHOOK_TOKEN`, `USSD_CODE` | Optional. The one USSD provider accepted (`africastalking`, `arkesel` or `mnotify`), the 32+ character secret it calls at `POST /webhooks/ussd/{provider}/{token}`, and the code shown in SMS. USSD is off until all three are set |
 | `USSD_ALLOWED_IPS`, `TRUST_FORWARDED_FOR` | Optional. Addresses the USSD provider calls from, and whether to read the caller from `X-Forwarded-For` (true behind Render) |
+| `PAYOUT_HOLD_S`, `PAYOUT_SECOND_APPROVAL_PESEWAS` | Optional. How long rider earnings wait for disputes (48 h), and the daily amount per rider above which a second supervisor approves a payout (GHS 200) |
 
 Supabase Auth settings the Engine relies on, locally in `supabase/config.toml` and on each hosted project:
 
@@ -46,7 +47,9 @@ Supabase Auth settings the Engine relies on, locally in `supabase/config.toml` a
 USSD notes:
 
 - The mNotify USSD format comes from its spec alone and is untested: confirm session ids and the new-session signal in a sandbox before choosing it.
-- Feature-phone riders pick their location from zones and landmarks. `supabase/seed.sql` loads sample ones locally only. Hosted databases need surveyed zones and landmarks added before USSD riders can be dispatched.
+- Feature-phone riders pick their location from zones and landmarks. `supabase/seed.sql` loads sample ones locally only. Hosted databases need surveyed ones added through `POST /v1/admin/zones` before USSD riders can be dispatched.
+
+Rider payouts are sent by hand over mobile money. A supervisor requests the payout, a second one approves it if it's over the threshold, someone sends the money to the payout number on the request, then records the MoMo reference. Only that last step touches the ledger.
 
 ## Layout
 
@@ -60,6 +63,7 @@ USSD notes:
 | `app/domain/dispatch.py` | Nearest-rider offers, expiry and re-dispatch |
 | `app/domain/pins.py` | Confirmation PINs |
 | `app/domain/ussd.py` | USSD menus for feature-phone riders and households |
+| `app/domain/supervision.py` | Supervisor console: review queue, interventions, riders, payouts, zones |
 | `app/adapters/` | Paystack and mNotify, plus in-memory fakes |
 | `app/api/` | Routes for households, riders, supervisors and providers |
 | `app/auth.py` | Supabase access-token verification |
