@@ -7,6 +7,7 @@ unusable reply, a photo that may be reused, a heavy load, a rider overriding
 the check or not answering all send the pickup to a supervisor."""
 
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
@@ -27,6 +28,9 @@ from app.domain.pickups import Event, Offering, Status
 
 # The first photo plus two retakes.
 MAX_PHOTOS = 3
+# Times a feature-phone rider can enter the weight for one pickup. Each one
+# texts the household, so a rider can't spam them or keep a job open forever.
+MAX_WEIGHT_ENTRIES = 3
 # Photos this close to an earlier pickup's photo might be the same one reused.
 NEAR_DUPLICATE_BITS = 8
 PHOTO_URL_TTL_S = 300
@@ -49,6 +53,11 @@ class NothingToDecide(Exception):
     """The pickup isn't waiting for a supervisor's check."""
 
 
+def kg(weight_g: int) -> str:
+    """The exact weight in kg, as everyone involved sees it: 4.25, not 4.2."""
+    return format(Decimal(weight_g) / 1000, "f")
+
+
 def earnings(declared_type: str, weight_g: int) -> tuple[int, int]:
     """Points for the household and pay for the rider: floor(kg x rate)."""
     settings = get_settings()
@@ -57,23 +66,61 @@ def earnings(declared_type: str, weight_g: int) -> tuple[int, int]:
     return points, pay
 
 
-async def expect_material(conn: Conn, pickup_id: UUID, rider_id: UUID, weight_g: int) -> None:
-    """Check the rider can send a photo now, before the upload is processed."""
-    pickup = await pickup_flow.assigned_to(conn, pickup_id, rider_id)
-    if pickup["offering"] != Offering.PLASTIC or pickup["status"] != Status.ARRIVED:
-        raise pickups.InvalidTransition(
-            "send the photo and weight once you've arrived at a plastic pickup"
-        )
+async def expect_rider_photo(conn: Conn, pickup_id: UUID, rider_id: UUID, weight_g: int) -> None:
+    """Check an app rider can send the photo and weight now, before the upload
+    is processed."""
+    await _rider_may_submit(conn, pickup_id, rider_id)
     _check_weight(weight_g)
 
 
-def _check_weight(weight_g: int) -> None:
-    limit = get_settings().plastic_max_weight_g
-    if not 0 < weight_g <= limit:
-        raise WeightOutOfRange(f"the weight must be more than 0 and at most {limit // 1000} kg")
+async def expect_household_photo(
+    conn: Conn, pickup_id: UUID, household_id: UUID, weight_g: int
+) -> None:
+    await _household_may_submit(conn, pickup_id, household_id, weight_g)
 
 
-async def submit(
+async def enter_weight(
+    conn: Conn, pickup_id: UUID, *, rider_id: UUID, user_id: UUID, weight_g: int
+) -> None:
+    """A feature-phone rider weighs the plastic by USSD. The household then
+    takes the photo, since the rider's phone can't."""
+    await pickup_flow.assigned_to(conn, pickup_id, rider_id)
+    pickup = await _pickup(conn, pickup_id)
+    _at_the_door(pickup)
+    if pickup["rider_channel"] != "ussd":
+        raise pickups.InvalidTransition("send the weight with the photo in the app")
+    _check_weight(weight_g)
+    cur = await conn.execute(
+        "select count(*) as n from engine.events"
+        " where pickup_id = %s and name = 'pickup.weight_entered'",
+        (pickup_id,),
+    )
+    if (await cur.fetchone())["n"] >= MAX_WEIGHT_ENTRIES:
+        raise pickups.InvalidTransition("the weight can't be changed again: call a supervisor")
+    points, pay = earnings(pickup["declared_type"], weight_g)
+    result = await pickups.apply(
+        conn,
+        pickup_id,
+        Event.WEIGHT_ENTERED,
+        expected_version=pickup["version"],
+        actor_type="rider",
+        actor_id=user_id,
+        changes={"weight_g": weight_g, "points_due": points, "rider_pay_pesewas": pay},
+        payload={"weight_g": weight_g, "points_due": points, "rider_pay_pesewas": pay},
+    )
+    await pickup_flow.watch_arrival(conn, pickup_id, result.version, since=pickup["arrived_at"])
+    if weight_g != pickup["weight_g"]:
+        await _tell(
+            conn,
+            pickup["household_user_id"],
+            pickup_id,
+            "photo_wanted",
+            f"Imfucuza: your rider weighed {kg(weight_g)} kg of plastic. If that's right, take "
+            "a photo of it now in the Imfucuza app so it can be checked.",
+        )
+
+
+async def submit_from_rider(
     conn: Conn,
     pickup_id: UUID,
     *,
@@ -84,23 +131,101 @@ async def submit(
     photo: PreparedPhoto,
     weight_g: int,
 ) -> pickups.Transitioned:
-    pickup = await pickup_flow.assigned_to(conn, pickup_id, rider_id)
+    pickup = await _rider_may_submit(conn, pickup_id, rider_id)
     _check_weight(weight_g)
+    return await _record(conn, pickup, "rider", user_id, photo_id, storage_key, photo, weight_g)
+
+
+async def submit_from_household(
+    conn: Conn,
+    pickup_id: UUID,
+    *,
+    household_id: UUID,
+    user_id: UUID,
+    photo_id: UUID,
+    storage_key: str,
+    photo: PreparedPhoto,
+    weight_g: int,
+) -> pickups.Transitioned:
+    pickup = await _household_may_submit(conn, pickup_id, household_id, weight_g)
+    return await _record(
+        conn, pickup, "household", user_id, photo_id, storage_key, photo, pickup["weight_g"]
+    )
+
+
+async def _rider_may_submit(conn: Conn, pickup_id: UUID, rider_id: UUID) -> dict:
+    pickup = await pickup_flow.assigned_to(conn, pickup_id, rider_id)
+    _at_the_door(pickup)
+    return await _pickup(conn, pickup_id)
+
+
+async def _household_may_submit(
+    conn: Conn, pickup_id: UUID, household_id: UUID, weight_g: int
+) -> dict:
+    """`weight_g` is the weight the household was shown: the photo vouches for
+    that weight only, not one the rider changed while it uploaded."""
+    pickup = await _pickup(conn, pickup_id)
+    if pickup["household_id"] != household_id:
+        raise pickup_flow.NotYourPickup("pickup not found")
+    _at_the_door(pickup)
+    if pickup["rider_channel"] != "ussd":
+        raise pickups.InvalidTransition("your rider takes the photo for this pickup")
+    if pickup["weight_g"] is None:
+        raise pickups.InvalidTransition("wait for your rider to weigh the plastic first")
+    if pickup["weight_g"] != weight_g:
+        raise pickups.InvalidTransition(
+            f"the weight is now {kg(pickup['weight_g'])} kg: check it, then send the photo again"
+        )
+    return pickup
+
+
+def _at_the_door(pickup: dict) -> None:
+    if pickup["offering"] != Offering.PLASTIC or pickup["status"] != Status.ARRIVED:
+        raise pickups.InvalidTransition(
+            "the plastic is weighed and photographed once the rider has arrived"
+        )
+
+
+def _check_weight(weight_g: int) -> None:
+    limit = get_settings().plastic_max_weight_g
+    if not 0 < weight_g <= limit:
+        raise WeightOutOfRange(f"the weight must be more than 0 and at most {limit // 1000} kg")
+
+
+async def _record(
+    conn: Conn,
+    pickup: dict,
+    source: str,
+    user_id: UUID,
+    photo_id: UUID,
+    storage_key: str,
+    photo: PreparedPhoto,
+    weight_g: int,
+) -> pickups.Transitioned:
     points, pay = earnings(pickup["declared_type"], weight_g)
     await conn.execute(
         """
         insert into engine.pickup_photos
             (id, pickup_id, storage_key, sha256, upload_sha256, dhash, source, captured_by)
-        values (%s, %s, %s, %s, %s, %s, 'rider', %s)
+        values (%s, %s, %s, %s, %s, %s, %s, %s)
         """,
-        (photo_id, pickup_id, storage_key, photo.sha256, photo.upload_sha256, photo.dhash, user_id),
+        (
+            photo_id,
+            pickup["id"],
+            storage_key,
+            photo.sha256,
+            photo.upload_sha256,
+            photo.dhash,
+            source,
+            user_id,
+        ),
     )
     result = await pickups.apply(
         conn,
-        pickup_id,
+        pickup["id"],
         Event.PHOTO_SUBMITTED,
         expected_version=pickup["version"],
-        actor_type="rider",
+        actor_type=source,
         actor_id=user_id,
         changes={
             "weight_g": weight_g,
@@ -118,7 +243,7 @@ async def submit(
     await jobs.enqueue(
         conn,
         "verification.run",
-        {"pickup_id": str(pickup_id), "photo_id": str(photo_id)},
+        {"pickup_id": str(pickup["id"]), "photo_id": str(photo_id)},
         dedupe_key=f"verify:{photo_id}",
     )
     return result
@@ -180,7 +305,7 @@ async def _run(conn: Conn, payload: dict[str, Any]) -> None:
         )
     except PhotoUnreadable:
         await _log(conn, pickup, photo["id"], "classifier", "unreadable")
-        await _retake(conn, pickup)
+        await _retake(conn, pickup, photo["source"])
         return
     except ClassifierUnavailable as exc:
         await _log(conn, pickup, photo["id"], "classifier", "unavailable", reason=str(exc)[:200])
@@ -228,7 +353,11 @@ async def _run(conn: Conn, payload: dict[str, Any]) -> None:
             "outcome": outcome,
         },
     )
-    if outcome is policy.Outcome.ACCEPT:
+    if outcome is policy.Outcome.ACCEPT and photo["source"] == "household":
+        # The household took the photo that earns it points, and a feature-phone
+        # rider can't see it: the rider vouches for the plastic in hand.
+        await _defer(conn, pickup, passed=True)
+    elif outcome is policy.Outcome.ACCEPT:
         await _accept(conn, pickup, Event.VERIFICATION_ACCEPTED, actor_type="system")
     elif outcome is policy.Outcome.REJECT:
         await _reject(conn, pickup, result.reason, Event.VERIFICATION_REJECTED)
@@ -263,7 +392,7 @@ async def _earlier_copy(conn: Conn, photo: dict) -> dict | None:
     return await cur.fetchone()
 
 
-async def _retake(conn: Conn, pickup: dict) -> None:
+async def _retake(conn: Conn, pickup: dict, taken_by: str) -> None:
     cur = await conn.execute(
         "select count(*) as n from engine.pickup_photos where pickup_id = %s", (pickup["id"],)
     )
@@ -277,20 +406,43 @@ async def _retake(conn: Conn, pickup: dict) -> None:
         expected_version=pickup["version"],
         actor_type="system",
     )
-    await pickup_flow.watch_arrival(conn, pickup["id"], result.version)
+    await pickup_flow.watch_arrival(conn, pickup["id"], result.version, since=pickup["arrived_at"])
     await _tell(
         conn,
-        pickup["rider_user_id"],
+        pickup["household_user_id"] if taken_by == "household" else pickup["rider_user_id"],
         pickup["id"],
         "retake",
         "Imfucuza: the photo of the plastic couldn't be used. Please take another in the app.",
     )
+    if taken_by == "household":
+        await _tell(
+            conn,
+            pickup["rider_user_id"],
+            pickup["id"],
+            "retake",
+            "Imfucuza: the household's photo couldn't be used, so they are taking another. "
+            "Please wait.",
+        )
 
 
 async def _accept(
     conn: Conn, pickup: dict, event: Event, *, actor_type: str, actor_id: UUID | None = None
 ) -> None:
-    if pickup["weight_g"] > get_settings().plastic_review_above_g:
+    settings = get_settings()
+    cur = await conn.execute(
+        """
+        select source from engine.pickup_photos where pickup_id = %s
+         order by created_at desc limit 1
+        """,
+        (pickup["id"],),
+    )
+    latest = await cur.fetchone()
+    heavy = (
+        settings.plastic_household_review_above_g
+        if latest and latest["source"] == "household"
+        else settings.plastic_review_above_g
+    )
+    if pickup["weight_g"] > heavy:
         await _to_supervisor(conn, pickup, "a heavy load: check the weight against the photo")
         return
     result = await pickups.apply(
@@ -303,6 +455,8 @@ async def _accept(
         changes={"verification_outcome": "accepted", "collected_at": pickups.NOW},
     )
     await pickup_flow.await_pin(conn, pickup["id"], result.version)
+    if actor_type != "rider":
+        await _tell_ussd_rider_to_collect(conn, pickup, "The plastic was accepted.")
 
 
 async def _reject(
@@ -342,7 +496,7 @@ async def _reject(
         )
 
 
-async def _defer(conn: Conn, pickup: dict) -> None:
+async def _defer(conn: Conn, pickup: dict, *, passed: bool = False) -> None:
     result = await pickups.apply(
         conn,
         pickup["id"],
@@ -359,13 +513,22 @@ async def _defer(conn: Conn, pickup: dict) -> None:
         run_at=datetime.now(UTC) + timedelta(seconds=wait_s),
         dedupe_key=f"rider-review:{pickup['id']}:{result.version}",
     )
+    where = (
+        f"dial {_ussd_code()}, choose 5 and accept or reject it"
+        if pickup["rider_channel"] == "ussd"
+        else "accept or reject it in the app"
+    )
+    check = (
+        "the household's photo passed the check. Make sure the plastic in front of you matches"
+        if passed
+        else "the photo check was unsure. Look at the plastic"
+    )
     await _tell(
         conn,
         pickup["rider_user_id"],
         pickup["id"],
         "rider_review",
-        "Imfucuza: the photo check was unsure. Look at the plastic, then accept or reject it "
-        f"in the app within {wait_s // 60} min.",
+        f"Imfucuza: {check}, then {where} within {wait_s // 60} min.",
     )
 
 
@@ -390,6 +553,7 @@ async def _to_supervisor(
         payload={"reason": reason},
     )
     await pickup_flow.await_pin(conn, pickup["id"], result.version)
+    await _tell_ussd_rider_to_collect(conn, pickup, "A supervisor will check the photo.")
 
 
 # The rider decides -------------------------------------------------------------
@@ -570,6 +734,14 @@ async def supervisor_decides(
             actor_id=supervisor_id,
             changes={"verification_outcome": "rejected", "failure_reason": "supervisor"},
         )
+        await _tell(
+            conn,
+            pickup["rider_user_id"],
+            pickup_id,
+            "plastic_rejected",
+            "Imfucuza: a supervisor didn't accept the plastic at your pickup. If you have it, "
+            "return it to the household. The job is closed.",
+        )
 
     if accept:
         await _tell(
@@ -675,6 +847,23 @@ async def _log(
     )
 
 
+async def _tell_ussd_rider_to_collect(conn: Conn, pickup: dict, outcome: str) -> None:
+    """App riders see the next step in the app. Feature-phone riders need telling."""
+    if pickup["rider_channel"] == "ussd":
+        await _tell(
+            conn,
+            pickup["rider_user_id"],
+            pickup["id"],
+            "collect_plastic",
+            f"Imfucuza: {outcome} Take the plastic, ask the household for the PIN, then dial "
+            f"{_ussd_code()} and choose 6.",
+        )
+
+
+def _ussd_code() -> str:
+    return get_settings().ussd_code or "the Imfucuza code"
+
+
 async def _tell(
     conn: Conn, user_id: UUID | None, pickup_id: UUID, template: str, text: str
 ) -> None:
@@ -687,7 +876,8 @@ async def _tell(
 async def _pickup(conn: Conn, pickup_id: UUID) -> dict[str, Any]:
     cur = await conn.execute(
         """
-        select p.*, h.user_id as household_user_id, r.user_id as rider_user_id
+        select p.*, h.user_id as household_user_id, r.user_id as rider_user_id,
+               r.channel as rider_channel
           from engine.pickup_requests p
           join engine.households h on h.id = p.household_id
           left join engine.riders r on r.id = p.assigned_rider_id
@@ -697,5 +887,5 @@ async def _pickup(conn: Conn, pickup_id: UUID) -> dict[str, Any]:
     )
     pickup = await cur.fetchone()
     if pickup is None:
-        raise LookupError("pickup not found")
+        raise pickup_flow.NotYourPickup("pickup not found")
     return pickup

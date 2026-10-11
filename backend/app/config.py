@@ -60,6 +60,8 @@ class Settings(BaseSettings):
     rider_pay_pesewas_per_kg: int = Field(100, ge=0)
     plastic_max_weight_g: int = Field(25_000, gt=0)
     plastic_review_above_g: int = Field(10_000, gt=0)
+    # Lower when the household took the photo for a feature-phone rider.
+    plastic_household_review_above_g: int = Field(5_000, gt=0)
     plastic_pickups_per_day: int = Field(2, gt=0)
     # How long a rider has to decide on plastic the classifier was unsure about.
     rider_review_s: int = Field(10 * 60, gt=0)

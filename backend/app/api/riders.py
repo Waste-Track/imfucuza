@@ -1,20 +1,17 @@
-import contextlib
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
-from uuid import UUID, uuid4
+from uuid import UUID
 
-import anyio
-from fastapi import APIRouter, HTTPException, Query, Request, status
+from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
 
-from app import services
-from app.adapters.base import ProviderError
+from app.api import uploads
 from app.api.common import PinEntry, pin_response
 from app.api.deps import RiderBriefDep, RiderDep
 from app.config import get_settings
 from app.db import ConnDep
-from app.domain import dispatch, photos, pickup_flow, pins, plastic
+from app.domain import dispatch, pickup_flow, pins, plastic
 
 router = APIRouter(prefix="/v1", tags=["riders"])
 
@@ -165,49 +162,22 @@ async def submit_plastic(
     weight_g: Annotated[int, Query(gt=0)],
 ) -> dict:
     """The photo is the request body (JPEG, PNG or WebP), the weight a query
-    parameter. Taken at the door, once the rider has weighed the plastic.
-
-    No database connection is held while the photo uploads and is processed:
-    slow uploads would otherwise starve every other request."""
+    parameter. Taken at the door, once the rider has weighed the plastic."""
     pool = request.app.state.pool
     async with pool.connection() as conn, conn.transaction():
-        await plastic.expect_material(conn, pickup_id, rider.rider_id, weight_g)
-    data = await _read_upload(request, photos.MAX_UPLOAD_BYTES)
-    photo = await anyio.to_thread.run_sync(
-        photos.prepare, data, limiter=request.app.state.photo_limiter
-    )
-    photo_id = uuid4()
-    storage_key = f"{pickup_id}/{photo_id}.jpg"
-    store = services.get().photos
-    try:
-        await store.put(storage_key, photo.jpeg, "image/jpeg")
-    except ProviderError as exc:
-        if exc.retryable:
-            raise HTTPException(
-                status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="the photo couldn't be stored, try again",
-            ) from exc
-        raise HTTPException(
-            status.HTTP_502_BAD_GATEWAY, detail="the photo couldn't be stored"
-        ) from exc
-    try:
-        async with pool.connection() as conn, conn.transaction():
-            result = await plastic.submit(
-                conn,
-                pickup_id,
-                rider_id=rider.rider_id,
-                user_id=rider.user.id,
-                photo_id=photo_id,
-                storage_key=storage_key,
-                photo=photo,
-                weight_g=weight_g,
-            )
-    except Exception:
-        # A photo with no record would never be found or deleted again.
-        with anyio.CancelScope(shield=True):
-            with contextlib.suppress(ProviderError):
-                await store.delete(storage_key)
-        raise
+        await plastic.expect_rider_photo(conn, pickup_id, rider.rider_id, weight_g)
+    photo = await uploads.store(request, pickup_id)
+    async with uploads.kept_if_recorded(photo), pool.connection() as conn, conn.transaction():
+        result = await plastic.submit_from_rider(
+            conn,
+            pickup_id,
+            rider_id=rider.rider_id,
+            user_id=rider.user.id,
+            photo_id=photo.id,
+            storage_key=photo.storage_key,
+            photo=photo.prepared,
+            weight_g=weight_g,
+        )
     return {"status": result.status}
 
 
@@ -224,23 +194,6 @@ async def rider_decision(
         conn, pickup_id, rider_id=rider.rider_id, user_id=rider.user.id, accept=body.accept
     )
     return {"status": new_status}
-
-
-async def _read_upload(request: Request, limit: int) -> bytes:
-    """Read the body, giving up as soon as it passes `limit`."""
-    too_big = HTTPException(
-        status.HTTP_413_CONTENT_TOO_LARGE, detail=f"the photo is larger than {limit // 2**20} MB"
-    )
-    declared = request.headers.get("content-length", "")
-    if declared.isdigit() and int(declared) > limit:
-        raise too_big
-    chunks, size = [], 0
-    async for chunk in request.stream():
-        size += len(chunk)
-        if size > limit:
-            raise too_big
-        chunks.append(chunk)
-    return b"".join(chunks)
 
 
 @router.post("/pickups/{pickup_id}/pin")

@@ -25,9 +25,6 @@ USSD_OFFER_OPTION = "3"
 # Self-reported location changes a rider may make in an hour (threat model T9).
 SELF_REPORTS_PER_HOUR = 6
 
-# Plastic needs a photo at the door, which USSD riders can't send yet.
-CHANNELS = {Offering.REFUSE: ("pwa", "ussd"), Offering.PLASTIC: ("pwa",)}
-
 MAX_MISSED_OFFERS = 3
 UNREACHABLE_FOR = timedelta(minutes=30)
 
@@ -78,7 +75,6 @@ async def ranked_candidates(
     lat: float,
     lng: float,
     settings: Settings,
-    channels: tuple[str, ...] = ("pwa", "ussd"),
 ) -> list[Candidate]:
     cur = await conn.execute(
         """
@@ -105,7 +101,7 @@ async def ranked_candidates(
           from engine.riders r
           join engine.users u on u.id = r.user_id
           join latest l on l.rider_id = r.id
-         where r.on_duty and u.status = 'active' and r.channel = any(%(channels)s)
+         where r.on_duty and u.status = 'active'
            and (r.unreachable_until is null or r.unreachable_until < now())
            and l.taken_at > now() - make_interval(secs =>
                  case when l.source = 'gps' then %(gps_fresh)s else %(self_fresh)s end)
@@ -122,7 +118,6 @@ async def ranked_candidates(
             "self_fresh": settings.self_report_fresh_s,
             "active": list(ACTIVE_JOB_STATUSES),
             "pickup_id": pickup_id,
-            "channels": list(channels),
         },
     )
     found = []
@@ -181,9 +176,7 @@ async def dispatch_next(conn: Conn, payload: dict) -> None:
         return
 
     offering = Offering(pickup["offering"])
-    ranked = await ranked_candidates(
-        conn, pickup_id, pickup["lat"], pickup["lng"], settings, CHANNELS[offering]
-    )
+    ranked = await ranked_candidates(conn, pickup_id, pickup["lat"], pickup["lng"], settings)
     await events.record(
         conn,
         "dispatch.round",

@@ -245,12 +245,16 @@ async def arrive_self_reported(
     return result
 
 
-async def watch_arrival(conn: Conn, pickup_id: UUID, version: int) -> None:
+async def watch_arrival(
+    conn: Conn, pickup_id: UUID, version: int, *, since: datetime | None = None
+) -> None:
+    """Flag the pickup if it's still waiting at the door ARRIVAL_TIMEOUT after
+    `since`, the arrival itself when steps at the door move the version on."""
     await jobs.enqueue(
         conn,
         "arrival.check",
         {"pickup_id": str(pickup_id), "version": version},
-        run_at=datetime.now(UTC) + ARRIVAL_TIMEOUT,
+        run_at=(since or datetime.now(UTC)) + ARRIVAL_TIMEOUT,
         dedupe_key=f"arrival-check:{pickup_id}:{version}",
     )
 

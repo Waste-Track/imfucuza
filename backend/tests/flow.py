@@ -76,6 +76,10 @@ class Db:
         self.conn.execute(query, params)
 
 
+# Zone 1, landmark 1 in seed.sql, about 100 m from HOME.
+MARKET_SQUARE = ("1", "1")
+
+
 def photo(size: tuple[int, int] = (720, 640)) -> bytes:
     """A new photo every call. Random blocks give a random difference hash, so
     it never looks like a copy of any photo already in the shared database."""
@@ -272,6 +276,35 @@ class World:
             json={"lat": near[0], "lng": near[1], "accuracy_m": 10, "recorded_at": _now_iso()},
         )
         assert response.status_code == 200, response.text
+
+    def ussd_rider(self, ready: bool = True) -> Actor:
+        """A feature-phone rider. Ready means on duty at Market square, about
+        100 m from HOME."""
+        rider = Actor()
+        response = self.client.post(
+            "/v1/admin/riders",
+            headers=self.supervisor().headers,
+            json={
+                "phone": rider.phone,
+                "name": "Yaw",
+                "channel": "ussd",
+                "consent_version": CONSENT,
+            },
+        )
+        assert response.status_code == 201, response.text
+        if ready:
+            assert self.ussd(rider, "1")[-1].startswith("END You are on duty")
+            assert self.ussd(rider, "2", *MARKET_SQUARE)[-1] == (
+                "END Location saved: Market square. Update it when you move."
+            )
+        return rider
+
+    def travel(self) -> None:
+        """Pretend the ride to the household took long enough."""
+        self.db.run(
+            "update engine.dispatch_offers set responded_at = now() - interval '20 minutes'"
+            " where response = 'accepted'"
+        )
 
     def plastic_pickup(self, household: Actor, declared_type: str = "pet") -> UUID:
         response = self.client.post(

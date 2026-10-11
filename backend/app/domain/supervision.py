@@ -346,10 +346,6 @@ async def assign(conn: Conn, pickup_id: UUID, rider_id: UUID, supervisor_id: UUI
     rider = await cur.fetchone()
     if rider is None or rider["status"] != "active":
         raise RiderUnavailable("rider not found or not active")
-    if rider["channel"] not in dispatch.CHANNELS[pickups.Offering(pickup["offering"])]:
-        raise RiderUnavailable(
-            f"a {rider['channel']} rider can't take a {pickup['offering']} pickup yet"
-        )
     cur = await conn.execute(
         """
         select (select count(*) from engine.pickup_requests
@@ -832,7 +828,7 @@ async def add_landmark(
 async def _pickup(conn: Conn, pickup_id: UUID) -> dict[str, Any]:
     cur = await conn.execute(
         """
-        select p.id, p.status, p.version, p.offering, p.assigned_rider_id,
+        select p.id, p.status, p.version, p.assigned_rider_id,
                h.user_id as household_user_id, r.user_id as rider_user_id,
                coalesce(p.paid_at, p.requested_at)
                  < now() - make_interval(secs => %s) as window_closing

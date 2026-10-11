@@ -118,7 +118,7 @@ async def issue(conn: Conn, payload: dict) -> None:
         # The household confirms the weight the rider entered, so state it.
         later = pickup["verification_outcome"] == "manual_review"
         text = (
-            f"Imfucuza: your rider weighed {pickup['weight_g'] / 1000:.1f} kg of plastic, "
+            f"Imfucuza: your rider weighed {plastic.kg(pickup['weight_g'])} kg of plastic, "
             f"worth {pickup['points_due']} points"
             + (" once a supervisor has checked the photo" if later else "")
             + f". Your PIN is {pin}. Give it only if the weight is right. "
