@@ -3,6 +3,7 @@ import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+import anyio
 from fastapi import FastAPI
 
 from app import services
@@ -23,18 +24,34 @@ class _RedactUssdToken(logging.Filter):
         return True
 
 
+class _QuietTicks(logging.Filter):
+    """Cron ticks every 10 s: log only the ticks that fail."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        args = record.args
+        return not (
+            isinstance(args, tuple)
+            and len(args) == 5
+            and args[2] == "/internal/tick"
+            and args[4] == 200
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     settings.check_deployable()
     access = logging.getLogger("uvicorn.access")
-    if not any(isinstance(f, _RedactUssdToken) for f in access.filters):
-        access.addFilter(_RedactUssdToken())
+    for log_filter in (_RedactUssdToken, _QuietTicks):
+        if not any(isinstance(f, log_filter) for f in access.filters):
+            access.addFilter(log_filter())
     services.ensure(settings)
     pool = create_pool(settings)
     # Fail the deploy if the database is unreachable, rather than serving /health.
     await pool.open(wait=True, timeout=15)
     app.state.pool = pool
+    app.state.tick_lock = anyio.Lock()
+    app.state.last_tick_at = None
     try:
         yield
     finally:
@@ -48,6 +65,13 @@ for module in (households, riders, supervisor, webhooks, ussd, internal):
 
 
 @app.get("/health")
-def health() -> dict[str, str]:
+def health() -> dict[str, str | None]:
     # The deploy job polls this until `commit` matches the SHA it deployed.
-    return {"status": "ok", "commit": os.environ.get("RENDER_GIT_COMMIT", "local")}
+    # `last_tick_at` is for an uptime monitor: Cron's own history reports
+    # success even when every tick is refused.
+    last_tick = getattr(app.state, "last_tick_at", None)
+    return {
+        "status": "ok",
+        "commit": os.environ.get("RENDER_GIT_COMMIT", "local"),
+        "last_tick_at": last_tick.isoformat() if last_tick else None,
+    }
