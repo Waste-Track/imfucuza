@@ -65,6 +65,10 @@ class Settings(BaseSettings):
     plastic_pickups_per_day: int = Field(2, gt=0)
     # How long a rider has to decide on plastic the classifier was unsure about.
     rider_review_s: int = Field(10 * 60, gt=0)
+    # Rewards. How long a voucher can be used for, and the version of the notice
+    # households accept before their name appears on the leaderboard.
+    voucher_valid_days: int = Field(30, gt=0)
+    leaderboard_consent_version: str = "2026-10-lb1"
     # Decision policy (engine-design.md section 5). Starting values until pilot
     # data calibrates them. Change the version whenever a threshold changes.
     verification_policy_version: str = "2026-10-p1"

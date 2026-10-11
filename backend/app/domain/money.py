@@ -8,6 +8,7 @@ from app.domain.ledger import (
     POINTS_AVAILABLE,
     POINTS_ISSUED,
     POINTS_PENDING,
+    POINTS_REDEEMED,
     PROVIDER_CLEARING,
     PROVIDER_FEE_EXPENSE,
     REFUND_PAYABLE,
@@ -133,4 +134,28 @@ def rider_pay(pickup_id: UUID, rider_id: UUID, amount: int) -> Posting:
             credit(Account(RIDER_PAYABLE, rider_id), amount),
         ),
         pickup_id=pickup_id,
+    )
+
+
+def voucher_redeem(voucher_id: UUID, household_id: UUID, points: int) -> Posting:
+    """A household spends points on a voucher."""
+    return Posting(
+        "voucher_redeem",
+        f"voucher:{voucher_id}",
+        (
+            debit(Account(POINTS_AVAILABLE, household_id), points),
+            credit(Account(POINTS_REDEEMED), points),
+        ),
+    )
+
+
+def voucher_void(voucher_id: UUID, household_id: UUID, points: int) -> Posting:
+    """An unused voucher expired: its points go back."""
+    return Posting(
+        "voucher_void",
+        f"vvoid:{voucher_id}",
+        (
+            debit(Account(POINTS_REDEEMED), points),
+            credit(Account(POINTS_AVAILABLE, household_id), points),
+        ),
     )

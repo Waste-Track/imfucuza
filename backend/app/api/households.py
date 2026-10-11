@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, date, datetime
 from typing import Annotated, Literal
 from uuid import UUID
 
@@ -13,7 +13,7 @@ from app.api.common import PinEntry, pin_response
 from app.api.deps import HouseholdBriefDep, HouseholdDep, PrincipalDep
 from app.config import get_settings
 from app.db import ConnDep
-from app.domain import payments, people, pickup_flow, pins, plastic
+from app.domain import payments, people, pickup_flow, pins, plastic, rewards
 from app.domain.pickups import Offering
 
 router = APIRouter(prefix="/v1", tags=["households"])
@@ -287,3 +287,114 @@ async def send_plastic_photo(
             weight_g=weight_g,
         )
     return {"status": result.status}
+
+
+# Rewards ------------------------------------------------------------------------
+
+
+class Product(BaseModel):
+    id: UUID
+    name: str
+    points_cost: int
+    face_value_pesewas: int
+
+
+@router.get("/vouchers/catalog")
+async def voucher_catalogue(conn: ConnDep, household: HouseholdDep) -> list[Product]:
+    return [Product(**row) for row in await rewards.catalogue(conn)]
+
+
+class VoucherRequest(BaseModel):
+    product_id: UUID
+
+
+class Voucher(BaseModel):
+    id: UUID
+    product: str
+    points: int
+    status: str
+    # Only while it can still be used.
+    code: str | None
+    issued_at: datetime
+    expires_at: datetime
+    used_at: datetime | None
+    used_at_shop: str | None
+
+
+@router.post("/vouchers", status_code=201)
+async def get_voucher(
+    body: VoucherRequest,
+    conn: ConnDep,
+    household: HouseholdDep,
+    idempotency_key: Annotated[str | None, Header()] = None,
+) -> JSONResponse:
+    """Spend points on a voucher. Its code comes by SMS and in GET /vouchers/me."""
+
+    async def work() -> tuple[int, dict]:
+        issued = await rewards.issue(
+            conn, household.household_id, body.product_id, household.user.id
+        )
+        # Not kept with the idempotency record: the code comes by SMS and from
+        # GET /vouchers/me, which stops showing it once the voucher is used.
+        return 201, Voucher(**{**issued, "code": None}).model_dump(mode="json")
+
+    code, view = await idempotency.once(
+        conn,
+        user_id=household.user.id,
+        key=idempotency_key,
+        request=body.model_dump(mode="json"),
+        work=work,
+    )
+    return JSONResponse(status_code=code, content=view)
+
+
+@router.get("/vouchers/me")
+async def my_vouchers(conn: ConnDep, household: HouseholdDep) -> list[Voucher]:
+    return [
+        Voucher(**row) for row in await rewards.household_vouchers(conn, household.household_id)
+    ]
+
+
+class LeaderboardChoice(BaseModel):
+    # A name to show, or null to leave the board.
+    name: str | None = Field(default=None, max_length=40)
+    consent_version: str | None = Field(
+        default=None, description="The leaderboard notice version accepted, when joining"
+    )
+
+
+@router.put("/households/me/leaderboard", status_code=204)
+async def leaderboard_choice(
+    body: LeaderboardChoice, conn: ConnDep, household: HouseholdDep
+) -> None:
+    if body.name is not None and body.consent_version != get_settings().leaderboard_consent_version:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"accept leaderboard notice {get_settings().leaderboard_consent_version} first",
+        )
+    try:
+        name = None if body.name is None else rewards.clean_name(body.name)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
+    await rewards.set_leaderboard_name(
+        conn,
+        household.household_id,
+        name,
+        user_id=household.user.id,
+        consent_version=body.consent_version,
+        channel="pwa",
+    )
+
+
+@router.get("/leaderboard")
+async def leaderboard(
+    conn: ConnDep,
+    household: HouseholdDep,
+    month: Annotated[str | None, Query(pattern=r"^20\d{2}-(0[1-9]|1[0-2])$")] = None,
+) -> dict:
+    """The board for the household's own zone, this month unless told otherwise."""
+    when = date.fromisoformat(f"{month}-01") if month else datetime.now(UTC).date().replace(day=1)
+    board = await rewards.leaderboard(conn, household.household_id, month=when)
+    if board is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="no zone found for this household")
+    return board
