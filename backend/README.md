@@ -44,6 +44,18 @@ Supabase Auth settings the Engine relies on, locally in `supabase/config.toml` a
 - Phone sign-up on, with **phone confirmations on**. Accounts are linked by the token's phone claim, which is only safe once Supabase has confirmed the number.
 - Send SMS hook pointing at `POST /hooks/supabase/send-sms`, so sign-in codes go out through mNotify.
 
+Supabase Cron calls `POST /internal/tick` every 10 seconds, which runs every timer: offer expiry, refunds, PIN deadlines and queued SMS. Set it up once per hosted project:
+
+1. Check the Render plan. A ticked service never sleeps, and two always-on free services use more than Render's 750 free hours a month, so give production a paid instance before it gets its secrets.
+2. On the dashboard's Vault page, add `engine_tick_url` (`https://<engine-host>/internal/tick`) and `engine_internal_secret` (the `INTERNAL_SECRET` value). Avoid the SQL editor for this: it keeps what you type as a saved snippet.
+3. Check the schedule with `select jobname, username, active from cron.job`: two jobs, both run as `postgres`.
+
+Until both secrets exist the schedule runs but sends nothing, as it does locally. Cron's own history shows success either way, since it only queues the request. To see whether ticks land, watch `last_tick_at` on `/health`, or run `select status_code, error_msg, count(*), max(created) from net._http_response group by 1, 2` for the last 6 hours.
+
+To rotate the secret, deploy the new `INTERNAL_SECRET` to Render, then update `engine_internal_secret` on the Vault page straight away. Ticks in between get a 401 and the next one 10 seconds later succeeds.
+
+To have Cron tick a local server, set `engine_tick_url` to `http://host.docker.internal:8000/internal/tick`, since pg_net runs inside the database container. Tests refuse to start until that secret is deleted again.
+
 USSD notes:
 
 - The mNotify USSD format comes from its spec alone and is untested: confirm session ids and the new-session signal in a sandbox before choosing it.
@@ -71,4 +83,4 @@ Rider payouts are sent by hand over mobile money. A supervisor requests the payo
 
 ## Migrations
 
-Create one with `supabase migration new <name>`. Engine tables go in the `engine` schema, which the Supabase Data API does not expose. Every table needs row-level security enabled, or CI fails. The ledger and event log are append-only: fix mistakes with a compensating posting, never an `UPDATE`.
+Create one with `supabase migration new <name>`. Engine tables go in the `engine` schema, which the Supabase Data API does not expose. Every table needs row-level security enabled, or CI fails. Never add `engine`, `net` or `vault` to the Data API's exposed schemas. The ledger and event log are append-only: fix mistakes with a compensating posting, never an `UPDATE`.

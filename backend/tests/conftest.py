@@ -36,6 +36,9 @@ def world(monkeypatch):
     services.install(fakes)
     app.dependency_overrides[current_principal] = principal_from_headers
     db = Db()
+    # Cron would hand a locally ticked Engine these tests' jobs.
+    if db.one("select count(*) as n from vault.secrets where name = 'engine_tick_url'")["n"]:
+        raise RuntimeError("delete the local engine_tick_url Vault secret before running tests")
     # The database is shared between tests: start with an empty queue, an
     # empty review queue, no open payouts and nobody on duty, so earlier
     # tests' leftovers don't interfere.
