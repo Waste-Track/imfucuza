@@ -72,7 +72,16 @@ async def _household_brief(request: Request, principal: PrincipalDep) -> Househo
         return await _household(conn, user)
 
 
+async def _rider_brief(request: Request, principal: PrincipalDep) -> Rider:
+    """Like RiderDep, but gives its connection back at once, for routes that
+    then take time over an upload."""
+    async with request.app.state.pool.connection() as conn, conn.transaction():
+        user = await _resolve_user(conn, principal)
+        return await _rider(conn, user)
+
+
 HouseholdDep = Annotated[Household, Depends(_household)]
 HouseholdBriefDep = Annotated[Household, Depends(_household_brief)]
 RiderDep = Annotated[Rider, Depends(_rider)]
+RiderBriefDep = Annotated[Rider, Depends(_rider_brief)]
 SupervisorDep = Annotated[User, Depends(_supervisor)]

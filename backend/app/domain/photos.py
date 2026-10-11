@@ -19,7 +19,7 @@ MAX_SIDE = 1600
 JPEG_QUALITY = 85
 # A difference hash with almost all bits equal comes from a flat or dark photo
 # and can't tell two such photos apart.
-_FLAT_BITS = 8
+FLAT_BITS = 8
 
 
 class NotAPhoto(ValueError):
@@ -75,7 +75,7 @@ def bits_apart(a: int, b: int) -> int:
 def has_signal(dhash: int) -> bool:
     """Whether the hash can tell this photo from others at all."""
     ones = (dhash & (2**64 - 1)).bit_count()
-    return _FLAT_BITS <= ones <= 64 - _FLAT_BITS
+    return FLAT_BITS <= ones <= 64 - FLAT_BITS
 
 
 def _decode(data: bytes) -> Image.Image:

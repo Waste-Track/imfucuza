@@ -169,6 +169,8 @@ class PhotoStore(Protocol):
         """A short-lived URL the classifier can fetch the photo from."""
         ...
 
+    async def delete(self, key: str) -> None: ...
+
 
 # Verification ------------------------------------------------------------------
 

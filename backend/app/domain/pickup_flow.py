@@ -29,6 +29,14 @@ class TooSoon(Exception):
         self.seconds_left = seconds_left
 
 
+class NotEligible(Exception):
+    pass
+
+
+class PickupLimit(Exception):
+    pass
+
+
 class TooFarAway(Exception):
     def __init__(self, distance_m: int) -> None:
         super().__init__(f"you are {distance_m} m from the pickup")
@@ -43,30 +51,45 @@ async def create(
     offering: Offering,
     lat: float | None,
     lng: float | None,
+    declared_type: str | None = None,
 ) -> UUID:
-    if offering is not Offering.REFUSE:
-        raise NotImplementedError("plastic collection is not available yet")
+    """Refuse waits for payment. Plastic is free, so it goes straight to dispatch."""
+    settings = get_settings()
+    # Locked, so two requests at once can't both get under the limits below.
+    cur = await conn.execute(
+        """
+        select lat, lng, plastic_eligible from engine.households where id = %s
+           for no key update
+        """,
+        (household_id,),
+    )
+    home = await cur.fetchone()
     if lat is None or lng is None:
-        cur = await conn.execute(
-            "select lat, lng from engine.households where id = %s", (household_id,)
-        )
-        home = await cur.fetchone()
         lat, lng = home["lat"], home["lng"]
     if lat is None or lng is None:
         raise ValueError("a pickup needs a location: send one or save it on your profile")
+    if offering is Offering.PLASTIC:
+        if declared_type not in settings.points_per_kg:
+            raise ValueError(f"say which plastic: {', '.join(settings.points_per_kg)}")
+        if not home["plastic_eligible"]:
+            raise NotEligible("plastic collection is paused for this household")
+        await _plastic_limits(conn, household_id, settings.plastic_pickups_per_day)
+    else:
+        declared_type = None
 
-    settings = get_settings()
     cur = await conn.execute(
         """
-        insert into engine.pickup_requests (household_id, offering, status, fee_pesewas, lat, lng)
-        values (%s, %s, %s, %s, %s, %s)
+        insert into engine.pickup_requests
+            (household_id, offering, status, fee_pesewas, declared_type, lat, lng)
+        values (%s, %s, %s, %s, %s, %s, %s)
         returning id
         """,
         (
             household_id,
             offering,
             pickups.initial_status(offering),
-            settings.refuse_fee_pesewas,
+            settings.refuse_fee_pesewas if offering is Offering.REFUSE else None,
+            declared_type,
             lat,
             lng,
         ),
@@ -80,14 +103,35 @@ async def create(
         pickup_id=pickup_id,
         payload={"offering": offering},
     )
-    await jobs.enqueue(
-        conn,
-        "payment.expire",
-        {"pickup_id": str(pickup_id)},
-        run_at=datetime.now(UTC) + timedelta(seconds=settings.payment_window_s),
-        dedupe_key=f"payment-expire:{pickup_id}",
-    )
+    if offering is Offering.PLASTIC:
+        await dispatch.start(conn, pickup_id)
+    else:
+        await jobs.enqueue(
+            conn,
+            "payment.expire",
+            {"pickup_id": str(pickup_id)},
+            run_at=datetime.now(UTC) + timedelta(seconds=settings.payment_window_s),
+            dedupe_key=f"payment-expire:{pickup_id}",
+        )
     return pickup_id
+
+
+async def _plastic_limits(conn: Conn, household_id: UUID, per_day: int) -> None:
+    """Free pickups paid by weight invite padding, so one at a time and a few a day."""
+    cur = await conn.execute(
+        """
+        select count(*) filter (where status <> all(%s)) as open,
+               count(*) filter (where requested_at > now() - interval '1 day') as today
+          from engine.pickup_requests
+         where household_id = %s and offering = 'plastic'
+        """,
+        (list(pickups.TERMINAL), household_id),
+    )
+    counts = await cur.fetchone()
+    if counts["open"]:
+        raise PickupLimit("you already have a plastic pickup on its way")
+    if counts["today"] >= per_day:
+        raise PickupLimit(f"plastic can be collected {per_day} times a day: try again tomorrow")
 
 
 async def cancel(conn: Conn, pickup_id: UUID, *, household_id: UUID, user_id: UUID) -> bool:
@@ -139,7 +183,7 @@ async def arrive(
         changes={"arrived_at": pickups.NOW},
         payload={"distance_m": distance},
     )
-    await _watch_arrival(conn, pickup_id, result.version)
+    await watch_arrival(conn, pickup_id, result.version)
     return result
 
 
@@ -197,11 +241,11 @@ async def arrive_self_reported(
         template="rider_arrived",
         text=f"Imfucuza: your rider says they have arrived. Not there? Dial {code}, choose 2.",
     )
-    await _watch_arrival(conn, pickup_id, result.version)
+    await watch_arrival(conn, pickup_id, result.version)
     return result
 
 
-async def _watch_arrival(conn: Conn, pickup_id: UUID, version: int) -> None:
+async def watch_arrival(conn: Conn, pickup_id: UUID, version: int) -> None:
     await jobs.enqueue(
         conn,
         "arrival.check",
@@ -241,11 +285,17 @@ async def collected(
         actor_id=user_id,
         changes={"collected_at": pickups.NOW},
     )
+    await await_pin(conn, pickup_id, result.version)
+    return result
+
+
+async def await_pin(conn: Conn, pickup_id: UUID, version: int) -> None:
+    """The rider has the waste: send the household its PIN."""
     await jobs.enqueue(
         conn,
         "pin.issue",
         {"pickup_id": str(pickup_id)},
-        dedupe_key=f"pin-issue:{pickup_id}:{result.version}",
+        dedupe_key=f"pin-issue:{pickup_id}:{version}",
         max_attempts=10,
     )
     # A fallback deadline in case no PIN is ever sent. Each PIN adds its own.
@@ -256,7 +306,6 @@ async def collected(
         run_at=datetime.now(UTC) + timedelta(seconds=get_settings().pin_ttl_s),
         dedupe_key=f"pin-expire:{pickup_id}",
     )
-    return result
 
 
 async def _pickup(conn: Conn, pickup_id: UUID) -> dict:

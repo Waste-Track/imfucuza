@@ -66,6 +66,11 @@ class Event(StrEnum):
     RIDER_ACCEPTED = "rider_accepted"
     RIDER_REJECTED = "rider_rejected"
     RIDER_REVIEW_TIMED_OUT = "rider_review_timed_out"
+    # The Engine wants a person to check: a photo that may be reused, a heavy
+    # load, or a rider accepting what the check leant towards rejecting.
+    SENT_FOR_REVIEW = "sent_for_review"
+    # A supervisor checked a manually reviewed photo before the PIN and refused it.
+    MATERIAL_REJECTED = "material_rejected"
     PIN_CONFIRMED = "pin_confirmed"
     PROBLEM_REPORTED = "problem_reported"
     PIN_EXPIRED = "pin_expired"
@@ -115,7 +120,14 @@ _RULES: list[tuple[tuple[Status, ...], Event, Status, frozenset[Offering]]] = [
     ((Status.RIDER_REVIEW,), Event.RIDER_ACCEPTED, Status.AWAITING_PIN, PLASTIC),
     ((Status.RIDER_REVIEW,), Event.RIDER_REJECTED, Status.REJECTED, PLASTIC),
     ((Status.RIDER_REVIEW,), Event.RIDER_REVIEW_TIMED_OUT, Status.AWAITING_PIN, PLASTIC),
+    (
+        (Status.VERIFYING, Status.RIDER_REVIEW),
+        Event.SENT_FOR_REVIEW,
+        Status.AWAITING_PIN,
+        PLASTIC,
+    ),
     ((Status.AWAITING_PIN,), Event.PIN_CONFIRMED, Status.COMPLETED, BOTH),
+    ((Status.AWAITING_PIN,), Event.MATERIAL_REJECTED, Status.REJECTED, PLASTIC),
     ((Status.AWAITING_PIN,), Event.PROBLEM_REPORTED, Status.DISPUTED, BOTH),
     ((Status.AWAITING_PIN,), Event.PIN_EXPIRED, Status.UNCONFIRMED, BOTH),
     ((Status.DISPUTED,), Event.DISPUTE_PIN_REISSUED, Status.AWAITING_PIN, BOTH),
@@ -166,6 +178,8 @@ _UPDATABLE = frozenset(
         "assigned_rider_id",
         "verification_outcome",
         "weight_g",
+        "points_due",
+        "rider_pay_pesewas",
         "failure_reason",
         "paid_at",
         "first_offered_at",

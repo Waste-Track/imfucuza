@@ -3,18 +3,26 @@
 Jobs run through POST /internal/tick, the same way Supabase Cron runs them.
 """
 
+import random
 import re
 from dataclasses import dataclass, field
+from io import BytesIO
 from uuid import UUID, uuid4
 
 import psycopg
 from fastapi import Request
 from fastapi.testclient import TestClient
+from PIL import Image
 from psycopg.conninfo import conninfo_to_dict
 from psycopg.rows import dict_row
 
 from app.adapters.base import PaymentEventKind, RefundState
-from app.adapters.fakes import FakePaymentProvider, FakeSmsGateway
+from app.adapters.fakes import (
+    FakeClassifier,
+    FakePaymentProvider,
+    FakePhotoStore,
+    FakeSmsGateway,
+)
 from app.auth import Principal
 from app.config import get_settings
 from tests.helpers import LOCAL_HOSTS
@@ -68,12 +76,23 @@ class Db:
         self.conn.execute(query, params)
 
 
+def photo(size: tuple[int, int] = (720, 640)) -> bytes:
+    """A new photo every call. Random blocks give a random difference hash, so
+    it never looks like a copy of any photo already in the shared database."""
+    cells = Image.frombytes("L", (9, 8), random.randbytes(72))
+    out = BytesIO()
+    cells.resize(size, Image.Resampling.NEAREST).convert("RGB").save(out, "JPEG", quality=90)
+    return out.getvalue()
+
+
 @dataclass
 class World:
     client: TestClient
     payments: FakePaymentProvider
     sms: FakeSmsGateway
     db: Db
+    photos: FakePhotoStore
+    classifier: FakeClassifier
 
     def tick(self, rounds: int = 10) -> int:
         """Run due jobs until none are left. Returns how many ran."""
@@ -245,7 +264,7 @@ class World:
         )
         return self.arrive_and_collect(household, rider, pickup_id)
 
-    def arrive_and_collect(self, household: Actor, rider: Actor, pickup_id: UUID) -> str:
+    def arrive(self, rider: Actor, pickup_id: UUID) -> None:
         near = offset(HOME, 40)
         response = self.client.post(
             f"/v1/pickups/{pickup_id}/arrive",
@@ -253,6 +272,43 @@ class World:
             json={"lat": near[0], "lng": near[1], "accuracy_m": 10, "recorded_at": _now_iso()},
         )
         assert response.status_code == 200, response.text
+
+    def plastic_pickup(self, household: Actor, declared_type: str = "pet") -> UUID:
+        response = self.client.post(
+            "/v1/pickups",
+            headers={**household.headers, "idempotency-key": f"req-{uuid4()}"},
+            json={"offering": "plastic", "declared_type": declared_type},
+        )
+        assert response.status_code == 201, response.text
+        self.tick()
+        return UUID(response.json()["id"])
+
+    def submit_plastic(
+        self, rider: Actor, pickup_id: UUID, weight_g: int = 4200, image: bytes | None = None
+    ):
+        return self.client.post(
+            f"/v1/pickups/{pickup_id}/plastic",
+            params={"weight_g": weight_g},
+            headers={**rider.headers, "content-type": "image/jpeg"},
+            content=photo() if image is None else image,
+        )
+
+    def weigh_at_the_door(
+        self, rider: Actor, pickup_id: UUID, weight_g: int = 4200, image: bytes | None = None
+    ) -> None:
+        """Accept the open offer, arrive, send the photo and weight, and run the check."""
+        offer = self.open_offer(rider)
+        assert (
+            self.client.post(f"/v1/offers/{offer['id']}/accept", headers=rider.headers).status_code
+            == 200
+        )
+        self.arrive(rider, pickup_id)
+        response = self.submit_plastic(rider, pickup_id, weight_g, image)
+        assert response.status_code == 200, response.text
+        self.tick()
+
+    def arrive_and_collect(self, household: Actor, rider: Actor, pickup_id: UUID) -> str:
+        self.arrive(rider, pickup_id)
         assert (
             self.client.post(
                 f"/v1/pickups/{pickup_id}/collected", headers=rider.headers

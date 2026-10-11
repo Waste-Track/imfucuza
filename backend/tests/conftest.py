@@ -22,7 +22,12 @@ def world(monkeypatch):
     from fastapi.testclient import TestClient
 
     from app import services
-    from app.adapters.fakes import FakePaymentProvider, FakeSmsGateway
+    from app.adapters.fakes import (
+        FakeClassifier,
+        FakePaymentProvider,
+        FakePhotoStore,
+        FakeSmsGateway,
+    )
     from app.auth import current_principal
     from app.config import get_settings
     from app.main import app
@@ -32,7 +37,12 @@ def world(monkeypatch):
     monkeypatch.setenv("USSD_WEBHOOK_TOKEN", USSD_TOKEN)
     monkeypatch.setenv("USSD_PROVIDER", "africastalking")
     get_settings.cache_clear()
-    fakes = services.Services(payments=FakePaymentProvider(), sms=FakeSmsGateway())
+    fakes = services.Services(
+        payments=FakePaymentProvider(),
+        sms=FakeSmsGateway(),
+        photos=FakePhotoStore(),
+        classifier=FakeClassifier(),
+    )
     services.install(fakes)
     app.dependency_overrides[current_principal] = principal_from_headers
     db = Db()
@@ -54,7 +64,7 @@ def world(monkeypatch):
     db.run("update engine.riders set on_duty = false")
     try:
         with TestClient(app) as client:
-            yield World(client, fakes.payments, fakes.sms, db)
+            yield World(client, fakes.payments, fakes.sms, db, fakes.photos, fakes.classifier)
     finally:
         app.dependency_overrides.clear()
         services.uninstall()

@@ -57,6 +57,8 @@ STATUS_WORDS = {
     Status.ASSIGNED: "rider on the way",
     Status.ARRIVED: "rider has arrived",
     Status.LOCATION_ISSUE: "rider can't find you",
+    Status.VERIFYING: "checking the plastic",
+    Status.RIDER_REVIEW: "rider is checking the plastic",
     Status.AWAITING_PIN: "collected, confirm with your PIN",
     Status.DISPUTED: "problem reported, a supervisor will call",
     Status.COMPLETED: "done",
@@ -65,6 +67,7 @@ STATUS_WORDS = {
     Status.UNCONFIRMED: "never confirmed, a supervisor will call",
     Status.REFUNDED: "refunded",
     Status.FAILED: "could not be completed",
+    Status.REJECTED: "plastic not accepted",
 }
 
 
@@ -328,7 +331,7 @@ async def _pick_landmark(conn: Conn, session: Session, choice: str) -> Step:
 async def _offer(conn: Conn, rider: dict) -> Step:
     cur = await conn.execute(
         """
-        select o.id, o.distance_m, p.fee_pesewas,
+        select o.id, o.distance_m, p.offering, p.fee_pesewas,
                ceil(extract(epoch from o.expires_at - now()) / 60)::int as minutes_left
           from engine.dispatch_offers o
           join engine.pickup_requests p on p.id = o.pickup_id
@@ -339,10 +342,14 @@ async def _offer(conn: Conn, rider: dict) -> Step:
     offer = await cur.fetchone()
     if offer is None:
         return finish("No job offer right now.")
-    earning = offer["fee_pesewas"] * get_settings().rider_share_percent // 100
+    settings = get_settings()
+    if offer["offering"] == "plastic":
+        pay = f"GHS {settings.rider_pay_pesewas_per_kg / 100:.2f} per kg"
+    else:
+        pay = f"GHS {offer['fee_pesewas'] * settings.rider_share_percent // 100 / 100:.2f}"
     text = (
-        f"Job: refuse pickup {offer['distance_m'] / 1000:.1f} km away, "
-        f"you earn GHS {earning / 100:.2f}. {offer['minutes_left']} min left.\n1 Accept\n2 Decline"
+        f"Job: {offer['offering']} pickup {offer['distance_m'] / 1000:.1f} km away, "
+        f"you earn {pay}. {offer['minutes_left']} min left.\n1 Accept\n2 Decline"
     )
     return show(text, "offer", offer_id=str(offer["id"]))
 

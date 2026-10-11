@@ -14,7 +14,7 @@ from uuid import UUID
 from app import jobs
 from app.config import get_settings
 from app.db import Conn
-from app.domain import events, ledger, money, notify, payments, pickups, review
+from app.domain import events, ledger, money, notify, payments, pickups, plastic, review
 from app.domain.pickups import Event, Status
 
 PIN_DIGITS = 6
@@ -83,7 +83,8 @@ async def issue(conn: Conn, payload: dict) -> None:
     )
     cur = await conn.execute(
         """
-        select p.status, p.fee_pesewas, h.user_id
+        select p.status, p.offering, p.fee_pesewas, p.weight_g, p.points_due,
+               p.verification_outcome, h.user_id
           from engine.pickup_requests p
           join engine.households h on h.id = p.household_id
          where p.id = %s
@@ -113,12 +114,23 @@ async def issue(conn: Conn, payload: dict) -> None:
     issued = await cur.fetchone()
     # Each PIN gets its own deadline, so a resent PIN isn't cut short.
     await _expire_at(conn, pickup_id, issued)
-    fee = f"GHS {pickup['fee_pesewas'] / 100:.2f}" if pickup["fee_pesewas"] else "your points"
-    text = (
-        f"Imfucuza: your rider has collected your waste. Your PIN is {pin}. "
-        f"Give it only once the pickup is done: it releases {fee}. "
-        "If you get more than one PIN, use the latest."
-    )
+    if pickup["offering"] == pickups.Offering.PLASTIC:
+        # The household confirms the weight the rider entered, so state it.
+        later = pickup["verification_outcome"] == "manual_review"
+        text = (
+            f"Imfucuza: your rider weighed {pickup['weight_g'] / 1000:.1f} kg of plastic, "
+            f"worth {pickup['points_due']} points"
+            + (" once a supervisor has checked the photo" if later else "")
+            + f". Your PIN is {pin}. Give it only if the weight is right. "
+            "If you get more than one PIN, use the latest."
+        )
+    else:
+        text = (
+            f"Imfucuza: your rider has collected your waste. Your PIN is {pin}. "
+            f"Give it only once the pickup is done: it releases "
+            f"GHS {pickup['fee_pesewas'] / 100:.2f}. "
+            "If you get more than one PIN, use the latest."
+        )
     sent = await notify.send_now(
         conn,
         user_id=pickup["user_id"],
@@ -269,6 +281,8 @@ async def _complete(
                 pickup_id, pickup["assigned_rider_id"], held, get_settings().rider_share_percent
             ),
         )
+    if pickup["offering"] == pickups.Offering.PLASTIC:
+        await plastic.award(conn, pickup_id)
 
 
 async def _expire_at(conn: Conn, pickup_id: UUID, pin: dict) -> None:

@@ -39,6 +39,8 @@ Environment variables, read by `app/config.py`. With `ENVIRONMENT=local` (the de
 | `CLASSIFIER`, `CLASSIFIER_URL`, `CLASSIFIER_TOKEN` | `http` with the classifier's base URL and token (contract in [`../spec/classifier-contract.md`](../spec/classifier-contract.md)), or `none` to send every plastic pickup to a supervisor |
 | `USSD_PROVIDER`, `USSD_WEBHOOK_TOKEN`, `USSD_CODE` | Optional. The one USSD provider accepted (`africastalking`, `arkesel` or `mnotify`), the 32+ character secret it calls at `POST /webhooks/ussd/{provider}/{token}`, and the code shown in SMS. USSD is off until all three are set |
 | `USSD_ALLOWED_IPS`, `TRUST_FORWARDED_FOR` | Optional. Addresses the USSD provider calls from, and whether to read the caller from `X-Forwarded-For` (true behind Render) |
+| `POINTS_PER_KG`, `RIDER_PAY_PESEWAS_PER_KG`, `RIDER_REVIEW_S` | Optional. Plastic points per kg by type (JSON, PET, HDPE and PP 10, mixed 5), rider pay per verified kg (GHS 1), and how long a rider has to decide when the check is unsure (10 min) |
+| `PLASTIC_MAX_WEIGHT_G`, `PLASTIC_REVIEW_ABOVE_G`, `PLASTIC_PICKUPS_PER_DAY` | Optional. Limits on weight-paid pickups: the heaviest allowed (25 kg), above which a supervisor checks the weight before anyone is paid (10 kg), and requests per household a day (2, one open at a time) |
 | `VERIFY_ACCEPT_AT`, `VERIFY_REJECT_AT`, `VERIFICATION_POLICY_VERSION` | Optional. Classifier confidence needed to accept (0.90) or reject (0.80). Change the version with the thresholds |
 | `PAYOUT_HOLD_S`, `PAYOUT_SECOND_APPROVAL_PESEWAS` | Optional. How long rider earnings wait for disputes (48 h), and the daily amount per rider above which a second supervisor approves a payout (GHS 200) |
 
@@ -78,6 +80,7 @@ Rider payouts are sent by hand over mobile money. A supervisor requests the payo
 | `app/domain/dispatch.py` | Nearest-rider offers, expiry and re-dispatch |
 | `app/domain/pins.py` | Confirmation PINs |
 | `app/domain/ussd.py` | USSD menus for feature-phone riders and households |
+| `app/domain/plastic.py` | Plastic collection: the check at the door, rider and supervisor decisions, points and rider pay |
 | `app/domain/photos.py`, `verification.py` | Photo intake (EXIF stripped, fingerprinted) and the verification decision policy |
 | `app/domain/supervision.py` | Supervisor console: review queue, interventions, riders, payouts, zones |
 | `app/adapters/` | Paystack, mNotify, Supabase Storage and the classifier client, plus in-memory fakes |

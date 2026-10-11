@@ -42,6 +42,9 @@ class SupabasePhotoStore:
             headers={"content-type": content_type, "x-upsert": "true"},
         )
 
+    async def delete(self, key: str) -> None:
+        await self._call("DELETE", f"/object/{self._bucket}/{quote(key)}")
+
     async def signed_url(self, key: str, ttl_s: int) -> str:
         body = await self._call(
             "POST", f"/object/sign/{self._bucket}/{quote(key)}", json={"expiresIn": ttl_s}

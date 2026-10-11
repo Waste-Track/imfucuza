@@ -1,7 +1,7 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 LOCAL_DATABASE_URL = "postgresql://postgres:postgres@127.0.0.1:54322/postgres"
@@ -52,6 +52,17 @@ class Settings(BaseSettings):
     classifier: Literal["fake", "http", "none"] = "fake"
     classifier_url: str = ""
     classifier_token: SecretStr = SecretStr("")
+    # Plastic. Points per kg by declared type and what the platform pays the
+    # rider per verified kg. The rider enters the weight and both sides gain
+    # from inflating it, so loads above `plastic_review_above_g` wait for a
+    # supervisor, and each household gets one open request and a daily cap.
+    points_per_kg: dict[str, int] = {"pet": 10, "hdpe": 10, "pp": 10, "mixed_plastic": 5}
+    rider_pay_pesewas_per_kg: int = Field(100, ge=0)
+    plastic_max_weight_g: int = Field(25_000, gt=0)
+    plastic_review_above_g: int = Field(10_000, gt=0)
+    plastic_pickups_per_day: int = Field(2, gt=0)
+    # How long a rider has to decide on plastic the classifier was unsure about.
+    rider_review_s: int = Field(10 * 60, gt=0)
     # Decision policy (engine-design.md section 5). Starting values until pilot
     # data calibrates them. Change the version whenever a threshold changes.
     verification_policy_version: str = "2026-10-p1"
@@ -87,6 +98,14 @@ class Settings(BaseSettings):
     # reach them. Payouts to one rider above the limit in a day need a second supervisor.
     payout_hold_s: int = 48 * 60 * 60
     payout_second_approval_pesewas: int = 20000
+
+    @field_validator("points_per_kg")
+    @classmethod
+    def _every_type_priced(cls, rates: dict[str, int]) -> dict[str, int]:
+        types = {"pet", "hdpe", "pp", "mixed_plastic"}
+        if set(rates) != types or any(rate < 0 for rate in rates.values()):
+            raise ValueError(f"give a points rate of 0 or more for each of {sorted(types)}")
+        return rates
 
     def check_deployable(self) -> None:
         """Refuse to start a deployed Engine that would silently do nothing:

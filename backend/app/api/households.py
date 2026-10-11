@@ -13,7 +13,7 @@ from app.api.common import PinEntry, pin_response
 from app.api.deps import HouseholdBriefDep, HouseholdDep, PrincipalDep
 from app.config import get_settings
 from app.db import ConnDep
-from app.domain import payments, people, pickup_flow, pins
+from app.domain import payments, people, pickup_flow, pins, plastic
 from app.domain.pickups import Offering
 
 router = APIRouter(prefix="/v1", tags=["households"])
@@ -61,7 +61,9 @@ async def register(body: HouseholdProfile, conn: ConnDep, principal: PrincipalDe
 
 
 class PickupRequest(BaseModel):
-    offering: Literal["refuse"] = "refuse"
+    offering: Literal["refuse", "plastic"] = "refuse"
+    # Plastic only: what the household says it is handing over.
+    declared_type: Literal["pet", "hdpe", "pp", "mixed_plastic"] | None = None
     lat: float | None = Field(default=None, ge=-90, le=90)
     lng: float | None = Field(default=None, ge=-180, le=180)
 
@@ -71,6 +73,10 @@ class PickupView(BaseModel):
     offering: str
     status: str
     fee_pesewas: int | None
+    declared_type: str | None
+    weight_g: int | None
+    points_due: int | None
+    verification_outcome: str
     requested_at: datetime
     completed_at: datetime | None
 
@@ -91,6 +97,7 @@ async def request_pickup(
                 offering=Offering(body.offering),
                 lat=body.lat,
                 lng=body.lng,
+                declared_type=body.declared_type,
             )
         except ValueError as exc:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
@@ -110,7 +117,8 @@ async def request_pickup(
 async def my_pickups(conn: ConnDep, household: HouseholdDep) -> list[PickupView]:
     cur = await conn.execute(
         """
-        select id, offering, status, fee_pesewas, requested_at, completed_at
+        select id, offering, status, fee_pesewas, declared_type, weight_g, points_due,
+               verification_outcome, requested_at, completed_at
           from engine.pickup_requests
          where household_id = %s
          order by requested_at desc limit 50
@@ -217,7 +225,8 @@ async def confirm(
 async def _view(conn: ConnDep, pickup_id: UUID, household_id: UUID) -> PickupView:
     cur = await conn.execute(
         """
-        select id, offering, status, fee_pesewas, requested_at, completed_at
+        select id, offering, status, fee_pesewas, declared_type, weight_g, points_due,
+               verification_outcome, requested_at, completed_at
           from engine.pickup_requests where id = %s and household_id = %s
         """,
         (pickup_id, household_id),
@@ -226,3 +235,14 @@ async def _view(conn: ConnDep, pickup_id: UUID, household_id: UUID) -> PickupVie
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="pickup not found")
     return PickupView(**row)
+
+
+class Points(BaseModel):
+    available: int
+    # Earned on plastic a supervisor hasn't checked yet.
+    pending: int
+
+
+@router.get("/points/me")
+async def my_points(conn: ConnDep, household: HouseholdDep) -> Points:
+    return Points(**await plastic.balance(conn, household.household_id))

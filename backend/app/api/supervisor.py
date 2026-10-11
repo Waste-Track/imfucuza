@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field, field_validator
 from app.api.deps import SupervisorDep
 from app.config import get_settings
 from app.db import ConnDep
-from app.domain import people, supervision
+from app.domain import people, plastic, supervision
 
 router = APIRouter(prefix="/v1/admin", tags=["supervisor"])
 
@@ -96,6 +96,11 @@ class Assignment(BaseModel):
     rider_id: UUID
 
 
+class MaterialCheck(BaseModel):
+    accept: bool
+    note: str = Field(min_length=3, max_length=500)
+
+
 @router.post("/pickups/{pickup_id}/reissue-pin", status_code=202)
 async def reissue_pin(pickup_id: UUID, conn: ConnDep, supervisor: SupervisorDep) -> dict:
     await _found(supervision.reissue_pin(conn, pickup_id, supervisor.id))
@@ -120,6 +125,19 @@ async def assign(
 ) -> dict:
     await _found(supervision.assign(conn, pickup_id, body.rider_id, supervisor.id))
     return {"status": "assigned"}
+
+
+@router.post("/pickups/{pickup_id}/verification")
+async def check_material(
+    pickup_id: UUID, body: MaterialCheck, conn: ConnDep, supervisor: SupervisorDep
+) -> dict:
+    """Decide on plastic the photo check couldn't. Settles any pending points."""
+    decision = await _found(
+        plastic.supervisor_decides(
+            conn, pickup_id, supervisor_id=supervisor.id, accept=body.accept, note=body.note
+        )
+    )
+    return {"decision": decision}
 
 
 # Riders and payouts --------------------------------------------------------------
