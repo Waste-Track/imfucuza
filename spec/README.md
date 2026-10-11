@@ -96,6 +96,8 @@ Mermaid source: [architecture.mmd](architecture.mmd).
 
 Payment and identity data never cross the boundary. The classifier never issues a payment or points instruction.
 
+The HTTP interface is in [classifier-contract.md](classifier-contract.md).
+
 ## 9. Failure modes
 
 Fraud controls: escrow captured only on household PIN confirmation, branded collection bags, and USSD-based dispatch.
