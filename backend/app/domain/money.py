@@ -1,13 +1,17 @@
-"""The ledger postings for a paid pickup (engine-design.md section 4)."""
+"""The ledger postings for pickups (engine-design.md section 4)."""
 
 from uuid import UUID
 
 from app.domain.ledger import (
     ESCROW,
     PLATFORM_REVENUE,
+    POINTS_AVAILABLE,
+    POINTS_ISSUED,
+    POINTS_PENDING,
     PROVIDER_CLEARING,
     PROVIDER_FEE_EXPENSE,
     REFUND_PAYABLE,
+    RIDER_PAY_EXPENSE,
     RIDER_PAYABLE,
     Account,
     Posting,
@@ -78,6 +82,55 @@ def refund_paid(pickup_id: UUID, household_id: UUID, reference: str, amount: int
         (
             debit(Account(REFUND_PAYABLE, household_id), amount),
             credit(Account(PROVIDER_CLEARING), amount),
+        ),
+        pickup_id=pickup_id,
+    )
+
+
+def points_accrue(pickup_id: UUID, household_id: UUID, points: int, *, pending: bool) -> Posting:
+    """Points for a confirmed plastic pickup. Pending until a supervisor has
+    checked a photo the classifier couldn't."""
+    to = POINTS_PENDING if pending else POINTS_AVAILABLE
+    return Posting(
+        "points_accrue",
+        f"accrue:{pickup_id}",
+        (debit(Account(POINTS_ISSUED), points), credit(Account(to, household_id), points)),
+        pickup_id=pickup_id,
+    )
+
+
+def points_release(pickup_id: UUID, household_id: UUID, points: int) -> Posting:
+    return Posting(
+        "points_release",
+        f"points-release:{pickup_id}",
+        (
+            debit(Account(POINTS_PENDING, household_id), points),
+            credit(Account(POINTS_AVAILABLE, household_id), points),
+        ),
+        pickup_id=pickup_id,
+    )
+
+
+def points_void(pickup_id: UUID, household_id: UUID, points: int) -> Posting:
+    return Posting(
+        "points_void",
+        f"points-void:{pickup_id}",
+        (
+            debit(Account(POINTS_PENDING, household_id), points),
+            credit(Account(POINTS_ISSUED), points),
+        ),
+        pickup_id=pickup_id,
+    )
+
+
+def rider_pay(pickup_id: UUID, rider_id: UUID, amount: int) -> Posting:
+    """The platform pays the rider for verified plastic."""
+    return Posting(
+        "rider_pay",
+        f"rider-pay:{pickup_id}",
+        (
+            debit(Account(RIDER_PAY_EXPENSE), amount),
+            credit(Account(RIDER_PAYABLE, rider_id), amount),
         ),
         pickup_id=pickup_id,
     )

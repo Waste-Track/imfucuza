@@ -8,7 +8,7 @@ keyed by its reference, so a household that paid twice gets both back.
 """
 
 import logging
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 from uuid import UUID, uuid4
 
 from psycopg_pool import AsyncConnectionPool
@@ -25,7 +25,7 @@ from app.adapters.base import (
 )
 from app.config import get_settings
 from app.db import Conn
-from app.domain import events, ledger, money, pickups, review
+from app.domain import dispatch, events, ledger, money, pickups, review
 from app.domain.pickups import Event, Status
 
 log = logging.getLogger(__name__)
@@ -223,14 +223,7 @@ async def settle_collection(conn: Conn, reference: str) -> None:
             changes={"paid_at": pickups.NOW},
         )
         await ledger.post(conn, hold)
-        await jobs.enqueue(conn, "dispatch.next", {"pickup_id": str(pickup_id)})
-        await jobs.enqueue(
-            conn,
-            "dispatch.expire",
-            {"pickup_id": str(pickup_id)},
-            run_at=datetime.now(UTC) + timedelta(seconds=get_settings().dispatch_window_s),
-            dedupe_key=f"dispatch-expire:{pickup_id}",
-        )
+        await dispatch.start(conn, pickup_id)
     elif not already_funded and pay["pickup_status"] in pickups.TERMINAL:
         # The only payment arrived after the pickup was cancelled or expired.
         await ledger.post(conn, hold)

@@ -157,6 +157,9 @@ class FakePhotoStore:
             raise ProviderError(f"fake photo store: no object {key}", retryable=False)
         return f"https://photos.test/{key}?expires_in={ttl_s}"
 
+    async def delete(self, key: str) -> None:
+        self.objects.pop(key, None)
+
 
 @dataclass
 class FakeClassifier:

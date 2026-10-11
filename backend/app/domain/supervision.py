@@ -13,15 +13,16 @@ from uuid import UUID
 
 from psycopg import errors
 
-from app import jobs
+from app import jobs, services
+from app.adapters.base import ProviderError
 from app.config import get_settings
 from app.db import Conn
 from app.domain import dispatch, events, ledger, money, notify, payments, pickups, pins, review
 from app.domain.ledger import RIDER_PAYABLE, Account
 from app.domain.pickups import Event, Status
 
-# Another supervisor may take over a claim left this long.
-STALE_CLAIM = timedelta(hours=1)
+# How long a photo link in a review item works.
+PHOTO_URL_TTL_S = 300
 # These items are the only thing pointing at a stuck pickup, so they stay
 # open until something has happened to the pickup.
 OPEN_UNTIL_PICKUP_MOVES = frozenset({"dispatch_stalled"})
@@ -81,7 +82,8 @@ async def review_item_detail(conn: Conn, item_id: UUID) -> dict[str, Any] | None
 
     queries = {
         "pickup": """
-            select id, offering, status, fee_pesewas, requested_at, paid_at, assigned_at,
+            select id, offering, status, fee_pesewas, declared_type, weight_g, points_due,
+                   rider_pay_pesewas, verification_outcome, requested_at, paid_at, assigned_at,
                    arrived_at, collected_at, completed_at, assigned_rider_id, household_id
               from engine.pickup_requests where id = %s""",
         "timeline": """
@@ -106,11 +108,35 @@ async def review_item_detail(conn: Conn, item_id: UUID) -> dict[str, Any] | None
         "messages": """
             select template, body_masked, status, created_at
               from engine.notifications where pickup_id = %s order by created_at""",
+        "photos": """
+            select id, source, storage_key, created_at
+              from engine.pickup_photos where pickup_id = %s order by created_at""",
+        # Earlier photos this pickup's may be a copy of, to compare side by side.
+        "possible_copies_of": """
+            select distinct ph.id, ph.pickup_id, ph.storage_key, ph.created_at
+              from engine.events e
+              join engine.pickup_photos ph on ph.id = (e.payload->>'of')::uuid
+             where e.pickup_id = %s and e.name = 'photo.duplicate'""",
+        "verification": """
+            select stage, decision, confidence, reason, model_version, policy_version,
+                   is_override, actor_id, created_at
+              from engine.verification_decisions where pickup_id = %s order by id""",
     }
     for key, query in queries.items():
         cur = await conn.execute(query, (pickup_id,))
         detail[key] = await cur.fetchone() if key == "pickup" else await cur.fetchall()
+    for photo in [*detail["photos"], *detail["possible_copies_of"]]:
+        photo["url"] = await _photo_url(photo.pop("storage_key"))
     return detail
+
+
+async def _photo_url(storage_key: str) -> str | None:
+    """A link that works for a few minutes. The rest of the detail still loads
+    if storage is down."""
+    try:
+        return await services.get().photos.signed_url(storage_key, PHOTO_URL_TTL_S)
+    except ProviderError:
+        return None
 
 
 async def claim(conn: Conn, item_id: UUID, supervisor_id: UUID) -> None:
@@ -121,7 +147,7 @@ async def claim(conn: Conn, item_id: UUID, supervisor_id: UUID) -> None:
            and (assigned_to is null or assigned_to = %(me)s or claimed_at < now() - %(stale)s)
         returning id
         """,
-        {"me": supervisor_id, "id": item_id, "stale": STALE_CLAIM},
+        {"me": supervisor_id, "id": item_id, "stale": review.STALE_CLAIM},
     )
     if await cur.fetchone() is None:
         raise ReviewItemUnavailable("this item is resolved or claimed by someone else")
@@ -137,7 +163,8 @@ async def claim(conn: Conn, item_id: UUID, supervisor_id: UUID) -> None:
 async def resolve(conn: Conn, item_id: UUID, supervisor_id: UUID, resolution: str) -> None:
     cur = await conn.execute(
         """
-        select r.type, (r.payload->>'pickup_version')::int as raised_at_version, p.version
+        select r.type, (r.payload->>'pickup_version')::int as raised_at_version, p.version,
+               p.status as pickup_status, p.verification_outcome
           from engine.review_items r
           left join engine.pickup_requests p on p.id = r.pickup_id
          where r.id = %s
@@ -153,6 +180,14 @@ async def resolve(conn: Conn, item_id: UUID, supervisor_id: UUID, resolution: st
         raise ReviewItemUnavailable(
             "the pickup hasn't moved since this was raised: sort it out first"
         )
+    if (
+        found
+        and found["type"] == "manual_verification"
+        and found["verification_outcome"] == "manual_review"
+        and found["pickup_status"] in (Status.AWAITING_PIN, Status.COMPLETED)
+    ):
+        # Closing it here would leave the points pending and the rider unpaid.
+        raise ReviewItemUnavailable("decide on the plastic first, with its verification check")
     cur = await conn.execute(
         """
         update engine.review_items
@@ -163,7 +198,7 @@ async def resolve(conn: Conn, item_id: UUID, supervisor_id: UUID, resolution: st
            and (assigned_to is null or assigned_to = %(me)s or claimed_at < now() - %(stale)s)
         returning pickup_id, type
         """,
-        {"me": supervisor_id, "resolution": resolution, "id": item_id, "stale": STALE_CLAIM},
+        {"me": supervisor_id, "resolution": resolution, "id": item_id, "stale": review.STALE_CLAIM},
     )
     item = await cur.fetchone()
     if item is None:
@@ -311,6 +346,10 @@ async def assign(conn: Conn, pickup_id: UUID, rider_id: UUID, supervisor_id: UUI
     rider = await cur.fetchone()
     if rider is None or rider["status"] != "active":
         raise RiderUnavailable("rider not found or not active")
+    if rider["channel"] not in dispatch.CHANNELS[pickups.Offering(pickup["offering"])]:
+        raise RiderUnavailable(
+            f"a {rider['channel']} rider can't take a {pickup['offering']} pickup yet"
+        )
     cur = await conn.execute(
         """
         select (select count(*) from engine.pickup_requests
@@ -513,7 +552,8 @@ async def _available(conn: Conn, rider_id: UUID) -> int:
              - coalesce((select sum(e.amount) from engine.ledger_entries e
                           join engine.ledger_accounts a on a.id = e.account_id
                           join engine.ledger_transactions t on t.id = e.txn_id
-                         where a.code = %(code)s and e.side = 'credit' and t.kind = 'release'
+                         where a.code = %(code)s and e.side = 'credit'
+                           and t.kind in ('release', 'rider_pay')
                            and e.created_at > now() - make_interval(secs => %(hold)s)), 0)
              - coalesce((select sum(amount_pesewas) from engine.payouts
                           where rider_id = %(rider)s
@@ -792,7 +832,7 @@ async def add_landmark(
 async def _pickup(conn: Conn, pickup_id: UUID) -> dict[str, Any]:
     cur = await conn.execute(
         """
-        select p.id, p.status, p.version, p.assigned_rider_id,
+        select p.id, p.status, p.version, p.offering, p.assigned_rider_id,
                h.user_id as household_user_id, r.user_id as rider_user_id,
                coalesce(p.paid_at, p.requested_at)
                  < now() - make_interval(secs => %s) as window_closing

@@ -11,7 +11,7 @@ from app import jobs
 from app.config import Settings, get_settings
 from app.db import Conn
 from app.domain import events, notify, payments, pickups
-from app.domain.pickups import Event, Status
+from app.domain.pickups import Event, Offering, Status
 
 # Statuses in which a rider is busy with a pickup. Waiting for the household's
 # PIN doesn't count: the rider has already left.
@@ -24,6 +24,9 @@ UNCERTAINTY_M = {"gps": 0, "landmark": 300, "arrival": 300, "zone": 800}
 USSD_OFFER_OPTION = "3"
 # Self-reported location changes a rider may make in an hour (threat model T9).
 SELF_REPORTS_PER_HOUR = 6
+
+# Plastic needs a photo at the door, which USSD riders can't send yet.
+CHANNELS = {Offering.REFUSE: ("pwa", "ussd"), Offering.PLASTIC: ("pwa",)}
 
 MAX_MISSED_OFFERS = 3
 UNREACHABLE_FOR = timedelta(minutes=30)
@@ -70,7 +73,12 @@ class Candidate:
 
 
 async def ranked_candidates(
-    conn: Conn, pickup_id: UUID, lat: float, lng: float, settings: Settings
+    conn: Conn,
+    pickup_id: UUID,
+    lat: float,
+    lng: float,
+    settings: Settings,
+    channels: tuple[str, ...] = ("pwa", "ussd"),
 ) -> list[Candidate]:
     cur = await conn.execute(
         """
@@ -97,7 +105,7 @@ async def ranked_candidates(
           from engine.riders r
           join engine.users u on u.id = r.user_id
           join latest l on l.rider_id = r.id
-         where r.on_duty and u.status = 'active'
+         where r.on_duty and u.status = 'active' and r.channel = any(%(channels)s)
            and (r.unreachable_until is null or r.unreachable_until < now())
            and l.taken_at > now() - make_interval(secs =>
                  case when l.source = 'gps' then %(gps_fresh)s else %(self_fresh)s end)
@@ -114,6 +122,7 @@ async def ranked_candidates(
             "self_fresh": settings.self_report_fresh_s,
             "active": list(ACTIVE_JOB_STATUSES),
             "pickup_id": pickup_id,
+            "channels": list(channels),
         },
     )
     found = []
@@ -135,6 +144,18 @@ async def ranked_candidates(
     return sorted(found, key=lambda c: (c.score, c.jobs_today, -c.idle_s))
 
 
+async def start(conn: Conn, pickup_id: UUID) -> None:
+    """Look for a rider now, and give up when the dispatch window closes."""
+    await jobs.enqueue(conn, "dispatch.next", {"pickup_id": str(pickup_id)})
+    await jobs.enqueue(
+        conn,
+        "dispatch.expire",
+        {"pickup_id": str(pickup_id)},
+        run_at=datetime.now(UTC) + timedelta(seconds=get_settings().dispatch_window_s),
+        dedupe_key=f"dispatch-expire:{pickup_id}",
+    )
+
+
 @jobs.handler("dispatch.next")
 async def dispatch_next(conn: Conn, payload: dict) -> None:
     """Offer the pickup to the best rider, or try again later. A no-op unless
@@ -143,7 +164,7 @@ async def dispatch_next(conn: Conn, payload: dict) -> None:
     pickup_id = UUID(payload["pickup_id"])
     cur = await conn.execute(
         """
-        select p.status, p.version, p.lat, p.lng, p.fee_pesewas, p.first_offered_at,
+        select p.status, p.version, p.offering, p.lat, p.lng, p.fee_pesewas, p.first_offered_at,
                coalesce(p.paid_at, p.requested_at) as dispatch_since, h.user_id as household_user_id
           from engine.pickup_requests p
           join engine.households h on h.id = p.household_id
@@ -159,7 +180,10 @@ async def dispatch_next(conn: Conn, payload: dict) -> None:
         await _end_window(conn, pickup_id)
         return
 
-    ranked = await ranked_candidates(conn, pickup_id, pickup["lat"], pickup["lng"], settings)
+    offering = Offering(pickup["offering"])
+    ranked = await ranked_candidates(
+        conn, pickup_id, pickup["lat"], pickup["lng"], settings, CHANNELS[offering]
+    )
     await events.record(
         conn,
         "dispatch.round",
@@ -204,7 +228,13 @@ async def dispatch_next(conn: Conn, payload: dict) -> None:
         run_at=offer["expires_at"],
         dedupe_key=f"offer-expire:{offer['id']}",
     )
-    earning = pickup["fee_pesewas"] * settings.rider_share_percent // 100
+    km = f"{best.distance_m / 1000:.1f} km away"
+    if offering is Offering.PLASTIC:
+        per_kg = settings.rider_pay_pesewas_per_kg / 100
+        job = f"plastic pickup {km}, you earn GHS {per_kg:.2f} per kg"
+    else:
+        earning = pickup["fee_pesewas"] * settings.rider_share_percent // 100
+        job = f"refuse pickup {km}, you earn GHS {earning / 100:.2f}"
     if best.channel == "ussd":
         how = f"Dial {settings.ussd_code or 'the Imfucuza code'}, choose {USSD_OFFER_OPTION}"
     else:
@@ -215,10 +245,7 @@ async def dispatch_next(conn: Conn, payload: dict) -> None:
         pickup_id=pickup_id,
         offer_id=offer["id"],
         template="offer",
-        text=(
-            f"Imfucuza job: refuse pickup {best.distance_m / 1000:.1f} km away, "
-            f"you earn GHS {earning / 100:.2f}. {how} within {ttl // 60 or 1} min."
-        ),
+        text=f"Imfucuza job: {job}. {how} within {ttl // 60 or 1} min.",
     )
 
 

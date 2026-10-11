@@ -41,6 +41,8 @@ ESCROW = AccountType("escrow:pickup", Unit.GHS, Side.CREDIT, owned=True)
 RIDER_PAYABLE = AccountType("rider_payable", Unit.GHS, Side.CREDIT, owned=True)
 REFUND_PAYABLE = AccountType("refund_payable", Unit.GHS, Side.CREDIT, owned=True)
 PLATFORM_REVENUE = AccountType("platform_revenue", Unit.GHS, Side.CREDIT)
+# What the platform pays riders for plastic pickups, which households don't pay for.
+RIDER_PAY_EXPENSE = AccountType("rider_pay_expense", Unit.GHS, Side.DEBIT)
 PLATFORM_ADJUSTMENTS = AccountType(
     "platform_adjustments", Unit.GHS, Side.DEBIT, allow_negative=True
 )

@@ -51,6 +51,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await pool.open(wait=True, timeout=15)
     app.state.pool = pool
     app.state.tick_lock = anyio.Lock()
+    # Photos are processed one at a time, off the event loop.
+    app.state.photo_limiter = anyio.CapacityLimiter(1)
     app.state.last_tick_at = None
     try:
         yield

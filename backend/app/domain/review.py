@@ -1,5 +1,6 @@
 """The supervisor queue (engine-design.md section 6)."""
 
+from datetime import timedelta
 from typing import Any
 from uuid import UUID
 
@@ -7,6 +8,9 @@ from psycopg.types.json import Jsonb
 
 from app.db import Conn
 from app.domain import events
+
+# Another supervisor may take over a claim left this long.
+STALE_CLAIM = timedelta(hours=1)
 
 
 async def open_item(

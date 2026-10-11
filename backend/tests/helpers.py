@@ -56,12 +56,14 @@ async def make_household(conn: Conn) -> UUID:
 async def make_pickup(conn: Conn, offering: Offering) -> UUID:
     household_id = await make_household(conn)
     fee = 1000 if offering is Offering.REFUSE else None
+    declared = "pet" if offering is Offering.PLASTIC else None
     async with conn.transaction():
         cur = await conn.execute(
             """
-            insert into engine.pickup_requests (household_id, offering, status, fee_pesewas)
-            values (%s, %s, %s, %s) returning id
+            insert into engine.pickup_requests
+                (household_id, offering, status, fee_pesewas, declared_type)
+            values (%s, %s, %s, %s, %s) returning id
             """,
-            (household_id, offering, initial_status(offering), fee),
+            (household_id, offering, initial_status(offering), fee, declared),
         )
         return (await cur.fetchone())["id"]

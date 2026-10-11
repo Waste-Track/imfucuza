@@ -13,9 +13,11 @@ from app.domain.dispatch import (
     TooManyLocationChanges,
 )
 from app.domain.payments import PaymentNotAllowed
-from app.domain.pickup_flow import NotYourPickup, TooFarAway, TooSoon
+from app.domain.photos import NotAPhoto
+from app.domain.pickup_flow import NotEligible, NotYourPickup, PickupLimit, TooFarAway, TooSoon
 from app.domain.pickups import InvalidTransition, StaleVersion
 from app.domain.pins import PinLocked, PinUnavailable, TooManyAttempts
+from app.domain.plastic import NothingToDecide, WeightOutOfRange
 from app.domain.supervision import PayoutNotAllowed, ReviewItemUnavailable, RiderUnavailable
 
 _STATUS: list[tuple[type[Exception], int]] = [
@@ -35,6 +37,11 @@ _STATUS: list[tuple[type[Exception], int]] = [
     (ReviewItemUnavailable, 409),
     (PayoutNotAllowed, 409),
     (RiderUnavailable, 409),
+    (NotEligible, 403),
+    (PickupLimit, 409),
+    (NotAPhoto, 422),
+    (WeightOutOfRange, 422),
+    (NothingToDecide, 409),
     (ProviderError, 502),
     # Two requests raced for the same rows. The loser can simply try again.
     (pg.DeadlockDetected, 409),
