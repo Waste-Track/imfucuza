@@ -1,4 +1,5 @@
-from typing import Literal
+from datetime import date, timedelta
+from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Path, Query, status
@@ -8,7 +9,7 @@ from pydantic import BaseModel, Field, field_validator
 from app.api.deps import SupervisorDep
 from app.config import get_settings
 from app.db import ConnDep
-from app.domain import people, plastic, supervision
+from app.domain import people, plastic, rewards, supervision
 
 router = APIRouter(prefix="/v1/admin", tags=["supervisor"])
 
@@ -319,3 +320,127 @@ async def _found(action, what: str = "pickup"):
         return await action
     except LookupError as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"{what} not found") from exc
+
+
+# Rewards: shops, the catalogue and settling with shops ------------------------------
+
+
+class NewShop(BaseModel):
+    phone: str
+    name: str = Field(min_length=2, max_length=40)
+    consent_version: str = Field(description="Version of the consent form the shop signed")
+
+
+@router.post("/shops", status_code=201)
+async def register_shop(body: NewShop, conn: ConnDep, supervisor: SupervisorDep) -> dict:
+    if body.consent_version != get_settings().consent_version:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"use consent form {get_settings().consent_version}",
+        )
+    try:
+        phone = people.require_ghana(people.normalize_msisdn(body.phone))
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
+    try:
+        shop_id = await people.register_shop(
+            conn,
+            phone_e164=phone,
+            name=body.name,
+            consent_version=body.consent_version,
+            registered_by=supervisor.id,
+        )
+    except errors.UniqueViolation as exc:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, detail="this phone number is already registered"
+        ) from exc
+    return {"shop_id": shop_id}
+
+
+class NewProduct(BaseModel):
+    name: str = Field(min_length=2, max_length=40)
+    points_cost: int = Field(gt=0)
+    face_value_pesewas: int = Field(ge=0)
+
+
+@router.get("/voucher-products")
+async def voucher_products(conn: ConnDep, supervisor: SupervisorDep) -> list[dict]:
+    return await rewards.catalogue(conn, include_inactive=True)
+
+
+@router.post("/voucher-products", status_code=201)
+async def add_voucher_product(body: NewProduct, conn: ConnDep, supervisor: SupervisorDep) -> dict:
+    product_id = await rewards.add_product(
+        conn,
+        name=body.name,
+        points_cost=body.points_cost,
+        face_value_pesewas=body.face_value_pesewas,
+        supervisor_id=supervisor.id,
+    )
+    return {"product_id": product_id}
+
+
+class ProductActive(BaseModel):
+    active: bool
+
+
+@router.put("/voucher-products/{product_id}/active", status_code=204)
+async def set_voucher_product_active(
+    product_id: UUID, body: ProductActive, conn: ConnDep, supervisor: SupervisorDep
+) -> None:
+    await _found(
+        rewards.set_product_active(
+            conn, product_id, active=body.active, supervisor_id=supervisor.id
+        ),
+        "product",
+    )
+
+
+@router.get("/shops/redeemed")
+async def redeemed_by_shop(
+    conn: ConnDep,
+    supervisor: SupervisorDep,
+    month: Annotated[str, Query(pattern=r"^20\d{2}-(0[1-9]|1[0-2])$")],
+    shop_id: UUID | None = None,
+) -> list[dict]:
+    """Vouchers each shop redeemed in a month and what they're worth, to settle up."""
+    start = date.fromisoformat(f"{month}-01")
+    end = (start + timedelta(days=32)).replace(day=1)
+    return await rewards.shop_report(conn, shop_id=shop_id, start=start, end=end)
+
+
+class ShopActive(BaseModel):
+    active: bool
+
+
+@router.put("/shops/{shop_id}/active", status_code=204)
+async def set_shop_active(
+    shop_id: UUID, body: ShopActive, conn: ConnDep, supervisor: SupervisorDep
+) -> None:
+    await _found(
+        rewards.set_shop_active(conn, shop_id, active=body.active, supervisor_id=supervisor.id),
+        "shop",
+    )
+
+
+@router.get("/vouchers")
+async def household_vouchers(
+    conn: ConnDep, supervisor: SupervisorDep, phone: Annotated[str, Query()]
+) -> list[dict]:
+    """A household's vouchers, without codes, to follow up a report of misuse."""
+    try:
+        phone_e164 = people.normalize_msisdn(phone)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
+    return await _found(rewards.vouchers_for_phone(conn, phone_e164), "household")
+
+
+@router.delete("/households/{household_id}/leaderboard-name", status_code=204)
+async def clear_leaderboard_name(
+    household_id: UUID, conn: ConnDep, supervisor: SupervisorDep
+) -> None:
+    """Take an offensive name off the leaderboard."""
+    await _found(
+        rewards.clear_leaderboard_name(conn, household_id, supervisor_id=supervisor.id),
+        "household",
+    )

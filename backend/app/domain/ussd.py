@@ -20,7 +20,17 @@ from app import jobs
 from app.adapters.ussd_base import UssdReply, UssdRequest
 from app.config import get_settings
 from app.db import Conn
-from app.domain import dispatch, events, notify, people, pickup_flow, pins, plastic, review
+from app.domain import (
+    dispatch,
+    events,
+    notify,
+    people,
+    pickup_flow,
+    pins,
+    plastic,
+    review,
+    rewards,
+)
 from app.domain.pickups import InvalidTransition, StaleVersion, Status
 
 log = logging.getLogger(__name__)
@@ -50,6 +60,7 @@ RIDER_HOME = "\n".join(
         "6 Household PIN",
     ]
 )
+SHOP_HOME = "Imfucuza shop\n1 Redeem a voucher"
 HOUSEHOLD_HOME = (
     "Imfucuza\n1 Confirm pickup with PIN\n2 Report a problem\n3 My last pickup\n4 My points"
 )
@@ -134,7 +145,7 @@ async def handle(conn: Conn, request: UssdRequest, phone_e164: str) -> UssdReply
     user = await _user_by_phone(conn, phone_e164)
     if user is None:
         return UssdReply(NOT_REGISTERED, end=True)
-    if user["role"] not in ("rider", "household"):
+    if user["role"] not in ("rider", "household", "shop"):
         return UssdReply("Please use the Imfucuza supervisor app.", end=True)
 
     session = Session(user["id"], user["role"], user["channel"], "home", {})
@@ -218,6 +229,8 @@ async def _answer(conn: Conn, session: Session, choice: str) -> Step:
 async def _home(conn: Conn, session: Session) -> Step:
     if session.role == "household":
         return show(HOUSEHOLD_HOME, "household_home")
+    if session.role == "shop":
+        return show(SHOP_HOME, "shop_home")
     rider = await _rider(conn, session.user_id)
     return show(
         RIDER_HOME.format(
@@ -479,6 +492,51 @@ async def _rider_pin(conn: Conn, session: Session, choice: str) -> Step:
     return await _confirm(conn, session, pickup_id, choice, via="rider_entry", actor_type="rider")
 
 
+# Shop ------------------------------------------------------------------------
+
+
+async def _shop_home(conn: Conn, session: Session, choice: str) -> Step:
+    if choice == "1":
+        return show("Type the 10-digit voucher code:", "shop_code")
+    return show("Choose 1.\n" + SHOP_HOME, "shop_home")
+
+
+async def _shop_code(conn: Conn, session: Session, choice: str) -> Step:
+    code = re.sub(r"\s", "", choice)
+    if not re.fullmatch(r"\d{10}", code):
+        return show("A voucher code has 10 digits. Type it again:", "shop_code")
+    try:
+        found = await rewards.look_up(conn, session.user_id, code)
+    except rewards.TooManyWrongCodes:
+        return finish("Too many wrong codes. Please try again in an hour.")
+    if found is None:
+        return finish("No voucher has that code. Check it with the customer and dial again.")
+    if found["status"] == "used" and found["used_here"]:
+        return finish(
+            f"You redeemed this voucher on {found['used_at']:%d %b}. "
+            f"If you haven't yet, give the customer {found['name']}."
+        )
+    if found["status"] == "used":
+        return finish(f"This voucher was already used on {found['used_at']:%d %b}.")
+    if found["status"] == "expired" or found["lapsed"]:
+        return finish(f"This voucher expired on {found['expires_at']:%d %b}.")
+    return show(
+        f"Valid: {found['name']}.\n1 Give it now\n0 Cancel",
+        "shop_confirm",
+        voucher_id=str(found["id"]),
+    )
+
+
+async def _shop_confirm(conn: Conn, session: Session, choice: str) -> Step:
+    if choice != "1":
+        return finish("Cancelled. The voucher can still be used.")
+    try:
+        used = await rewards.redeem(conn, UUID(session.context["voucher_id"]), session.user_id)
+    except rewards.VoucherUnavailable:
+        return finish("Sorry, this voucher has just been used or has expired.")
+    return finish(f"Done. Give the customer {used['name']}. Ref {used['code'][-4:]}.")
+
+
 # Household -------------------------------------------------------------------
 
 
@@ -726,6 +784,9 @@ _SCREENS: dict[str, Handler] = {
     "pick_landmark": _pick_landmark,
     "offer": _answer_offer,
     "rider_pin": _rider_pin,
+    "shop_home": _shop_home,
+    "shop_code": _shop_code,
+    "shop_confirm": _shop_confirm,
     "rider_weight": _rider_weight,
     "rider_weight_confirm": _rider_weight_confirm,
     "rider_material": _rider_material,

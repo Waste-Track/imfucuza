@@ -180,3 +180,35 @@ async def rider_id_for(conn: Conn, user_id: UUID) -> UUID | None:
     cur = await conn.execute("select id from engine.riders where user_id = %s", (user_id,))
     row = await cur.fetchone()
     return row["id"] if row else None
+
+
+async def register_shop(
+    conn: Conn, *, phone_e164: str, name: str, consent_version: str, registered_by: UUID
+) -> UUID:
+    """A partner shop, with the phone it dials from to redeem vouchers."""
+    cur = await conn.execute(
+        """
+        insert into engine.users
+            (role, phone_e164, name, consent_version, consent_at, consent_channel)
+        values ('shop', %s, %s, %s, now(), 'paper')
+        returning id
+        """,
+        (phone_e164, name, consent_version),
+    )
+    user_id = (await cur.fetchone())["id"]
+    cur = await conn.execute(
+        """
+        insert into engine.partner_shops (user_id, name, created_by) values (%s, %s, %s)
+        returning id
+        """,
+        (user_id, name, registered_by),
+    )
+    shop_id = (await cur.fetchone())["id"]
+    await events.record(
+        conn,
+        "shop.registered",
+        actor_type="supervisor",
+        actor_id=registered_by,
+        payload={"shop_id": str(shop_id)},
+    )
+    return shop_id

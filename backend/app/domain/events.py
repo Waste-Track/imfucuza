@@ -5,7 +5,7 @@ from psycopg.types.json import Jsonb
 
 from app.db import Conn
 
-ACTOR_TYPES = frozenset({"household", "rider", "supervisor", "admin", "system", "provider"})
+ACTOR_TYPES = frozenset({"household", "rider", "supervisor", "admin", "shop", "system", "provider"})
 
 
 async def record(

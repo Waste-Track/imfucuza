@@ -269,7 +269,8 @@ class World:
         return self.arrive_and_collect(household, rider, pickup_id)
 
     def arrive(self, rider: Actor, pickup_id: UUID) -> None:
-        near = offset(HOME, 40)
+        door = self.db.one("select lat, lng from engine.pickup_requests where id = %s", pickup_id)
+        near = offset((door["lat"], door["lng"]), 40)
         response = self.client.post(
             f"/v1/pickups/{pickup_id}/arrive",
             headers=rider.headers,
