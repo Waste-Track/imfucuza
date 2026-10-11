@@ -1,9 +1,12 @@
+import logging
+
 import pytest
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
+from app import jobs
 from app.config import Settings, get_settings
-from app.main import app
+from app.main import _QuietTicks, app
 
 
 @pytest.fixture
@@ -35,3 +38,46 @@ def test_tick_with_the_secret_drains_the_queue(client_with_secret):
 
     assert response.status_code == 200
     assert set(response.json()) == {"succeeded", "retried", "failed"}
+
+
+def test_health_shows_when_the_queue_last_ran(client_with_secret):
+    with client_with_secret("cron-secret") as client:
+        before = client.get("/health").json()["last_tick_at"]
+        client.post("/internal/tick", headers={"X-Internal-Secret": "cron-secret"})
+        after = client.get("/health").json()["last_tick_at"]
+
+    assert before is None
+    assert after is not None
+
+
+class _Held:
+    def locked(self) -> bool:
+        return True
+
+
+def test_a_tick_is_skipped_while_another_is_running(client_with_secret, monkeypatch):
+    ran = []
+
+    async def run_due(*args, **kwargs):
+        ran.append(True)
+
+    monkeypatch.setattr(jobs, "run_due", run_due)
+    with client_with_secret("cron-secret") as client:
+        monkeypatch.setattr(client.app.state, "tick_lock", _Held())
+        response = client.post("/internal/tick", headers={"X-Internal-Secret": "cron-secret"})
+
+    assert response.json() == {"succeeded": 0, "retried": 0, "failed": 0}
+    assert ran == []
+
+
+@pytest.mark.parametrize(
+    ("path", "status", "logged"),
+    [("/internal/tick", 200, False), ("/internal/tick", 401, True), ("/health", 200, True)],
+)
+def test_only_ticks_that_fail_reach_the_access_log(path, status, logged):
+    args = ("10.0.0.1:5000", "POST", path, "1.1", status)
+    record = logging.LogRecord(
+        "uvicorn.access", logging.INFO, "", 0, '%s - "%s %s HTTP/%s" %d', args, None
+    )
+
+    assert _QuietTicks().filter(record) is logged

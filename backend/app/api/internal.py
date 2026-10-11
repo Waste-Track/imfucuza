@@ -1,6 +1,7 @@
 """Routes called by Supabase Cron, never by clients."""
 
 import hmac
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
@@ -28,5 +29,12 @@ def require_internal_secret(
 
 @router.post("/tick", dependencies=[Depends(require_internal_secret)])
 async def tick(request: Request, settings: Annotated[Settings, Depends(get_settings)]) -> dict:
-    report = await jobs.run_due(request.app.state.pool, limit=settings.jobs_per_tick)
+    state = request.app.state
+    # Cron calls every 10 s whether or not the last tick has finished. Ticks
+    # side by side would hold every pool connection during a provider outage.
+    if state.tick_lock.locked():
+        return {"succeeded": 0, "retried": 0, "failed": 0}
+    async with state.tick_lock:
+        report = await jobs.run_due(state.pool, limit=settings.jobs_per_tick)
+    state.last_tick_at = datetime.now(UTC)
     return {"succeeded": report.succeeded, "retried": report.retried, "failed": report.failed}

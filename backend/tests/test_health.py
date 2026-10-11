@@ -11,4 +11,5 @@ def test_health_reports_ok_and_commit(monkeypatch):
     response = client.get("/health")
 
     assert response.status_code == 200
-    assert response.json() == {"status": "ok", "commit": "abc123"}
+    assert response.json()["status"] == "ok"
+    assert response.json()["commit"] == "abc123"
