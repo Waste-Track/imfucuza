@@ -32,6 +32,7 @@ class EngineReply(BaseModel):
 class FakeVerifier:
     version = 'verifier-v1+abc123def456'
     weights_sha256 = 'f' * 64
+    cgf = {}
 
     def __init__(self, suggested='accept', confidence=0.93, fail=False):
         self.suggested, self.confidence, self.fail, self.calls = suggested, confidence, fail, 0
