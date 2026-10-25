@@ -1,0 +1,11 @@
+# Same rule families as backend/pyproject.toml, pinned so a new ruff release
+# can't change what CI enforces. Notebooks are research records, not service code.
+line-length = 120
+target-version = "py311"
+extend-exclude = ["notebooks"]
+
+[lint]
+select = ["E", "F", "I", "B", "UP", "S"]
+
+[lint.per-file-ignores]
+"tests/**" = ["S101", "S105", "S106", "S311", "E402"]
