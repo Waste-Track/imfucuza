@@ -96,3 +96,11 @@ def test_deployed_ussd_needs_a_long_token_and_a_code():
 
     assert "USSD_WEBHOOK_TOKEN (32+ characters)" in str(exc.value)
     assert "USSD_CODE" in str(exc.value)
+
+
+def test_deployed_engine_refuses_plain_http_web_origins():
+    deployed(
+        cors_allowed_origins=["https://imfucuza.vercel.app", "http://localhost:3000"]
+    ).check_deployable()
+    with pytest.raises(RuntimeError, match="CORS_ALLOWED_ORIGINS"):
+        deployed(cors_allowed_origins=["http://imfucuza.vercel.app"]).check_deployable()

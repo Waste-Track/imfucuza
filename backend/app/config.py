@@ -1,3 +1,4 @@
+import re
 from functools import lru_cache
 from typing import Literal
 
@@ -17,9 +18,8 @@ class Settings(BaseSettings):
     database_url: str = LOCAL_DATABASE_URL
     supabase_url: str = "http://127.0.0.1:54321"
     jwt_audience: str = "authenticated"
-    # Origins the household and rider PWA is served from, e.g.
-    # ["https://app.imfucuza.app"]. Empty sends no CORS headers.
-    cors_origins: list[str] = []
+
+    cors_allowed_origins: list[str] = []
 
     # Shared secret for /internal/* routes. Empty disables them.
     internal_secret: SecretStr = SecretStr("")
@@ -115,6 +115,16 @@ class Settings(BaseSettings):
     payout_hold_s: int = 48 * 60 * 60
     payout_second_approval_pesewas: int = 20000
 
+    @field_validator("cors_allowed_origins")
+    @classmethod
+    def _exact_origins(cls, origins: list[str]) -> list[str]:
+        # Browsers send the origin without a trailing slash and match it exactly.
+        origins = [origin.rstrip("/").lower() for origin in origins]
+        for origin in origins:
+            if not re.fullmatch(r"https?://[^/\s*?#]+", origin):
+                raise ValueError(f"{origin!r} is not an origin like https://imfucuza.vercel.app")
+        return origins
+
     @field_validator("points_per_kg")
     @classmethod
     def _every_type_priced(cls, rates: dict[str, int]) -> dict[str, int]:
@@ -163,6 +173,10 @@ class Settings(BaseSettings):
                 missing.append("USSD_WEBHOOK_TOKEN (32+ characters)")
             if not self.ussd_code:
                 missing.append("USSD_CODE")
+        if any(
+            not o.startswith(("https://", "http://localhost")) for o in self.cors_allowed_origins
+        ):
+            missing.append("CORS_ALLOWED_ORIGINS (https only, or http://localhost)")
         if missing:
             raise RuntimeError(f"{self.environment}: set {', '.join(missing)}")
 

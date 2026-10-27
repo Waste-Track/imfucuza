@@ -63,15 +63,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(title="Engine", version="0.1.0", lifespan=lifespan)
 errors.install(app)
-# The PWA calls from its own origin with a bearer token, so no cookies are allowed.
-if get_settings().cors_origins:
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=get_settings().cors_origins,
-        allow_methods=["GET", "POST", "PUT", "DELETE"],
-        allow_headers=["Authorization", "Content-Type", "Idempotency-Key"],
-        max_age=600,
-    )
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=get_settings().cors_allowed_origins,
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
+    allow_headers=["Authorization", "Content-Type", "Idempotency-Key"],
+)
 for module in (me, households, riders, supervisor, webhooks, ussd, internal):
     app.include_router(module.router)
 

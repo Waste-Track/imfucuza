@@ -28,7 +28,7 @@ Build-time variables (Vite inlines them, so none of them may be secret):
 | `VITE_SUPABASE_PUBLISHABLE_KEY` | That project's publishable key (`sb_publishable_...`) |
 | `VITE_API_URL` | The Engine's public URL, e.g. `https://engine-staging.onrender.com`. Empty in development |
 
-When the PWA is served from its own origin, add that origin to the Engine's `CORS_ORIGINS`.
+When the PWA is served from its own origin, add that origin to the Engine's `CORS_ALLOWED_ORIGINS`.
 
 ## Hosting
 
