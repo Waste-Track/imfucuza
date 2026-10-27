@@ -17,6 +17,9 @@ class Settings(BaseSettings):
     database_url: str = LOCAL_DATABASE_URL
     supabase_url: str = "http://127.0.0.1:54321"
     jwt_audience: str = "authenticated"
+    # Origins the household and rider PWA is served from, e.g.
+    # ["https://app.imfucuza.app"]. Empty sends no CORS headers.
+    cors_origins: list[str] = []
 
     # Shared secret for /internal/* routes. Empty disables them.
     internal_secret: SecretStr = SecretStr("")

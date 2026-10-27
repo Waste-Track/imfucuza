@@ -5,9 +5,10 @@ from contextlib import asynccontextmanager
 
 import anyio
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from app import services
-from app.api import errors, households, internal, riders, supervisor, ussd, webhooks
+from app.api import errors, households, internal, me, riders, supervisor, ussd, webhooks
 from app.config import get_settings
 from app.db import create_pool
 
@@ -62,7 +63,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(title="Engine", version="0.1.0", lifespan=lifespan)
 errors.install(app)
-for module in (households, riders, supervisor, webhooks, ussd, internal):
+# The PWA calls from its own origin with a bearer token, so no cookies are allowed.
+if get_settings().cors_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=get_settings().cors_origins,
+        allow_methods=["GET", "POST", "PUT", "DELETE"],
+        allow_headers=["Authorization", "Content-Type", "Idempotency-Key"],
+        max_age=600,
+    )
+for module in (me, households, riders, supervisor, webhooks, ussd, internal):
     app.include_router(module.router)
 
 

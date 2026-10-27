@@ -37,7 +37,8 @@ Every run also scans the full history for secrets with gitleaks, and lints workf
 Order within a deploy:
 1. Database migrations (`supabase db push`).
 2. Backend, via a Render deploy hook pinned to the commit. The job then waits until `/health` reports that commit.
-3. Frontend and intelligence, via their deploy hooks.
+3. Frontend, built from the same commit and deployed with the Vercel CLI.
+4. Intelligence, via its deploy hook.
 
 Migrations run before the new backend starts, so the old backend briefly runs against the new schema. Keep migrations backwards compatible: add columns and tables first, remove them in a later release.
 
@@ -52,7 +53,9 @@ Set these per environment under **Settings → Environments** (`staging` and `pr
 | `SUPABASE_PROJECT_REF` | variable | Project ref, e.g. `abcd1234efgh5678` |
 | `RENDER_DEPLOY_HOOK_BACKEND` | secret | Render deploy hook URL of the backend service |
 | `BACKEND_URL` | variable | Public URL of the backend, e.g. `https://engine-staging.onrender.com` |
-| `FRONTEND_DEPLOY_HOOK` | secret | Deploy or build hook of the frontend host |
+| `VERCEL_TOKEN` | secret | Vercel access token that can deploy the frontend project |
+| `VERCEL_ORG_ID` | variable | Vercel team id (`team_...`), from `frontend/.vercel/project.json` after `vercel link` |
+| `VERCEL_PROJECT_ID` | variable | Vercel project id (`prj_...`), from the same file |
 | `INTELLIGENCE_DEPLOY_HOOK` | secret | Deploy hook of the classifier service |
 
 [`render.yaml`](render.yaml) defines the two backend services (`engine-staging`, `engine`). Auto-deploy is off, so Render only deploys commits the pipeline sends.
