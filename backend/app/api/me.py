@@ -15,6 +15,7 @@ class Me(BaseModel):
     # None until the signed-in phone registers as a household or a supervisor
     # registers it as a rider.
     role: str | None
+    user_id: UUID | None
     name: str | None
     status: str | None
     household_id: UUID | None
@@ -44,6 +45,7 @@ async def me(conn: ConnDep, principal: PrincipalDep) -> Me:
             rider_id, on_duty = row["id"], row["on_duty"]
     return Me(
         role=user.role if user else None,
+        user_id=user.id if user else None,
         name=user.name if user else None,
         status=user.status if user else None,
         household_id=household_id,

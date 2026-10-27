@@ -49,7 +49,7 @@ export function Register({ onBack }: { onBack: () => void }) {
   return (
     <Screen
       title="Set up your household"
-      eyebrow="WELCOME"
+      eyebrow="STEP 2 OF 2"
       actions={
         <Button variant="quiet" onClick={onBack}>
           Back

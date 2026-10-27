@@ -1,7 +1,7 @@
 import { Navigate, Route, Routes } from "react-router";
 import { Alert, Button, Loading, Screen } from "./components/ui";
 import { Account } from "./screens/Account";
-import { SignIn } from "./screens/SignIn";
+import { Landing } from "./screens/Landing";
 import { Welcome } from "./screens/Welcome";
 import { Home } from "./screens/household/Home";
 import { NewRequest } from "./screens/household/NewRequest";
@@ -12,6 +12,7 @@ import { Requests } from "./screens/household/Requests";
 import { RiderPending } from "./screens/rider/RiderPending";
 import { RiderHome } from "./screens/rider/RiderHome";
 import { RiderJob } from "./screens/rider/RiderJob";
+import { Console } from "./screens/supervisor/Console";
 import { useSession } from "./session";
 
 /** One app for both roles: who signed in decides which screens open. */
@@ -19,7 +20,7 @@ export function App() {
   const { session, me, meError, refreshMe, signOut } = useSession();
 
   if (session === undefined) return <Splash />;
-  if (!session) return <SignIn />;
+  if (!session) return <Landing />;
   if (!me) {
     if (!meError) return <Splash />;
     return (
@@ -63,8 +64,9 @@ export function App() {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       );
-    default:
-      return <Blocked title="Supervisors" text="This app is for households and riders. Use the supervisor console." />;
+    case "supervisor":
+    case "admin":
+      return <Console />;
   }
 }
 

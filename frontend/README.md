@@ -4,6 +4,19 @@ One installable PWA for households and smartphone riders, built with React and V
 
 Screens follow the design canvas "Smart Waste PWA, Rider and USSD Screens". The API contract is the backend's OpenAPI schema at `/openapi.json`.
 
+New visitors land on a page that explains the service and offers "Get my waste collected", "Register as a rider" or "Sign in". Registering is two steps: confirm the phone number with an SMS code (Supabase phone sign-in; the number is the account), then the household or rider form.
+
+## Supervisor console
+
+Supervisors and admins who sign in get the console instead: a desktop-first page (it also works on a phone) with the review queue (claim an item, see the pickup, photos, photo check and timeline, then act and resolve), rider applications and rider management (approve, suspend, payouts, payout number, registering feature-phone riders), payouts waiting for approval or to record, complaint decisions waiting for a second supervisor, zones and landmarks, and rewards (vouchers, partner shops, monthly shop report).
+
+A supervisor account is created in the database, once per person, and linked on their first sign-in with that number:
+
+```sql
+insert into engine.users (role, phone_e164, name, consent_version, consent_at, consent_channel)
+values ('supervisor', '+233241234567', 'Ama Mensah', '2026-10-v1', now(), 'paper');
+```
+
 ## Run locally
 
 Needs Node 24 and a local Engine (see [`../backend/README.md`](../backend/README.md)).

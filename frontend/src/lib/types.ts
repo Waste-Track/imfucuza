@@ -4,6 +4,7 @@ export type Role = "household" | "rider" | "supervisor" | "admin";
 
 export type Me = {
   role: Role | null;
+  user_id: string | null;
   name: string | null;
   // "pending" for a rider waiting for a supervisor to approve the application.
   status: "pending" | "active" | "suspended" | "deleted" | null;

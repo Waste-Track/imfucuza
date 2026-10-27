@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { Alert, Button, Field, Screen } from "../components/ui";
 import { ghanaPhone } from "../lib/format";
+import type { Intent } from "../lib/intent";
 import { supabase } from "../lib/supabase";
 
-export function SignIn() {
+export function SignIn({ intent, onBack }: { intent?: Intent; onBack: () => void }) {
   const [phone, setPhone] = useState("");
   const [sentTo, setSentTo] = useState<string>();
   const [code, setCode] = useState("");
@@ -37,11 +38,23 @@ export function SignIn() {
   };
 
   return (
-    <Screen title="Sign in" eyebrow="IMFUCUZA · MADINA">
+    <Screen
+      title={intent ? "Confirm your number" : "Sign in"}
+      eyebrow={intent === "rider" ? "RIDER · STEP 1 OF 2" : intent ? "STEP 1 OF 2" : "IMFUCUZA"}
+      actions={
+        <Button variant="quiet" onClick={onBack}>
+          Back
+        </Button>
+      }
+    >
       {!sentTo ? (
         <form className="stack" onSubmit={sendCode}>
           <p className="lead">
-            Waste pickups at your door, and points for your sorted plastic. We'll text you a code.
+            {intent === "rider"
+              ? "Your number is your rider account. Job offers and your earnings go to it. We'll text you a code to confirm it's yours."
+              : intent
+                ? "Your number is your account. Your pickup PIN and mobile money prompt go to it, and your rider calls it. We'll text you a code to confirm it's yours."
+                : "Enter the number you registered with. We'll text you a code."}
           </p>
           <Field id="phone" label="Mobile number">
             <input
@@ -58,7 +71,9 @@ export function SignIn() {
           <Button type="submit" busy={busy}>
             Text me a code
           </Button>
-          <p className="hint">Riders: use the number your supervisor registered.</p>
+          {!intent && (
+            <p className="hint">Riders registered by a supervisor: use that number.</p>
+          )}
         </form>
       ) : (
         <form className="stack" onSubmit={verify}>
@@ -76,7 +91,7 @@ export function SignIn() {
           </Field>
           {error && <Alert>{error}</Alert>}
           <Button type="submit" busy={busy} disabled={code.length < 6}>
-            Sign in
+            {intent ? "Confirm" : "Sign in"}
           </Button>
           <Button variant="quiet" onClick={() => setSentTo(undefined)}>
             Use a different number

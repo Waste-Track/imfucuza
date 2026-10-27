@@ -46,7 +46,7 @@ export function RiderRegister({ onBack }: { onBack: () => void }) {
   return (
     <Screen
       title="Register your tricycle"
-      eyebrow="RIDER"
+      eyebrow="RIDER · STEP 2 OF 2"
       actions={
         <Button variant="quiet" onClick={onBack}>
           Back

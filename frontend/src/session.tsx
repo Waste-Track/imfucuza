@@ -1,6 +1,7 @@
 import type { Session } from "@supabase/supabase-js";
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
 import { api, ApiError } from "./lib/api";
+import { saveIntent } from "./lib/intent";
 import { supabase } from "./lib/supabase";
 import type { Me } from "./lib/types";
 
@@ -29,6 +30,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const refreshMe = useCallback(async () => {
     try {
       const next = await api.me();
+      // Registered: the landing page choice has done its job.
+      if (next.role) saveIntent(undefined);
       setMe(next);
       setMeError(undefined);
       return next;

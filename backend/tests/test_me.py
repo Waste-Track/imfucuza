@@ -18,6 +18,7 @@ def test_a_registered_household_is_told_its_role(world):
     body = world.client.get("/v1/me", headers=household.headers).json()
 
     assert body["role"] == "household"
+    assert body["user_id"] is not None
     assert body["household_id"] is not None
     assert body["rider_id"] is None
 

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Icon } from "../components/Icon";
 import { Button, Screen } from "../components/ui";
+import { loadIntent } from "../lib/intent";
 import { useSession } from "../session";
 import { Register } from "./household/Register";
 import { RiderRegister } from "./rider/RiderRegister";
@@ -8,7 +9,7 @@ import { RiderRegister } from "./rider/RiderRegister";
 /** A phone the Engine doesn't know yet: set up a household or apply as a rider. */
 export function Welcome() {
   const { signOut } = useSession();
-  const [choice, setChoice] = useState<"household" | "rider">();
+  const [choice, setChoice] = useState<"household" | "rider" | undefined>(loadIntent);
 
   if (choice === "household") return <Register onBack={() => setChoice(undefined)} />;
   if (choice === "rider") return <RiderRegister onBack={() => setChoice(undefined)} />;
