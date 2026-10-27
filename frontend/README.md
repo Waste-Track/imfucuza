@@ -32,7 +32,14 @@ When the PWA is served from its own origin, add that origin to the Engine's `COR
 
 ## Hosting
 
-Vercel project `imfucuza` (team Geeks), production at https://imfucuza.vercel.app. [`vercel.json`](vercel.json) turns off Vercel's own Git deploys, so only the pipeline deploys: it builds the commit that passed `ci-ok` and deploys it with the Vercel CLI (see the root README, CI/CD). The `VITE_*` variables live in the Vercel project, per environment, and `vercel pull` brings them into the build.
+Two Vercel projects on team Geeks, one per environment, each pointing at its own Engine:
+
+| Environment | Vercel project | URL | Engine |
+| --- | --- | --- | --- |
+| staging | `imfucuza-staging` | https://imfucuza-staging.vercel.app | https://engine-staging-yk1g.onrender.com |
+| production | `imfucuza` | https://imfucuza.vercel.app | https://engine-qqgd.onrender.com |
+
+[`vercel.json`](vercel.json) turns off Vercel's own Git deploys, so only the pipeline deploys: it builds the commit that passed `ci-ok` and deploys it with the Vercel CLI to the project's production URL (see the root README, CI/CD). Vercel previews aren't used, because they sit behind a Vercel login and change URL on every deploy, which CORS can't allow. The `VITE_*` variables live in each project's Production environment, and `vercel pull` brings them into the build.
 
 To deploy by hand from this folder: `npx vercel link`, then `npx vercel deploy --prod`.
 

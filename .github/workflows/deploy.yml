@@ -119,11 +119,12 @@ jobs:
         env:
           VERCEL_CLI: vercel@65.2.0
         run: |
-          # Production gets the project's production domain; staging gets a preview URL.
-          if [ "$ENVIRONMENT" = production ]; then target=production; prod=--prod; else target=preview; prod=; fi
-          npx --yes "$VERCEL_CLI" pull --yes --environment="$target" --token="$VERCEL_TOKEN"
-          npx --yes "$VERCEL_CLI" build $prod --token="$VERCEL_TOKEN"
-          url=$(npx --yes "$VERCEL_CLI" deploy --prebuilt $prod --token="$VERCEL_TOKEN")
+          # Each GitHub environment has its own Vercel project (VERCEL_PROJECT_ID), so
+          # every deploy goes to that project's production URL: public and stable,
+          # which CORS_ALLOWED_ORIGINS needs. Vercel previews are neither.
+          npx --yes "$VERCEL_CLI" pull --yes --environment=production --token="$VERCEL_TOKEN"
+          npx --yes "$VERCEL_CLI" build --prod --token="$VERCEL_TOKEN"
+          url=$(npx --yes "$VERCEL_CLI" deploy --prebuilt --prod --token="$VERCEL_TOKEN")
           echo "Frontend deployed: $url" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Deploy intelligence

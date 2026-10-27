@@ -55,7 +55,7 @@ Set these per environment under **Settings → Environments** (`staging` and `pr
 | `BACKEND_URL` | variable | Public URL of the backend, e.g. `https://engine-staging.onrender.com` |
 | `VERCEL_TOKEN` | secret | Vercel access token that can deploy the frontend project |
 | `VERCEL_ORG_ID` | variable | Vercel team id (`team_...`), from `frontend/.vercel/project.json` after `vercel link` |
-| `VERCEL_PROJECT_ID` | variable | Vercel project id (`prj_...`), from the same file |
+| `VERCEL_PROJECT_ID` | variable | Vercel project id (`prj_...`): `imfucuza-staging` for staging, `imfucuza` for production. Each deploy goes to that project's production URL |
 | `INTELLIGENCE_DEPLOY_HOOK` | secret | Deploy hook of the classifier service |
 
 [`render.yaml`](render.yaml) defines the two backend services (`engine-staging`, `engine`). Auto-deploy is off, so Render only deploys commits the pipeline sends.
