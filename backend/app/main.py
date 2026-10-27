@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 
 import anyio
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from app import services
 from app.api import errors, households, internal, riders, supervisor, ussd, webhooks
@@ -62,6 +63,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(title="Engine", version="0.1.0", lifespan=lifespan)
 errors.install(app)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=get_settings().cors_allowed_origins,
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
+    allow_headers=["Authorization", "Content-Type", "Idempotency-Key"],
+)
 for module in (households, riders, supervisor, webhooks, ussd, internal):
     app.include_router(module.router)
 
