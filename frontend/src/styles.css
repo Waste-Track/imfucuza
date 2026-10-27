@@ -775,3 +775,33 @@ a:focus-visible {
   border-radius: 20px;
   font-size: 15px;
 }
+
+/* Sign-up choice and avatars ---------------------------------------------- */
+
+.choice {
+  width: 100%;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 96px;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+
+.card.choice {
+  color: var(--ink);
+}
+
+.avatar {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--green-soft);
+  color: var(--green);
+  font-size: 18px;
+  font-weight: 700;
+}

@@ -4,8 +4,8 @@ import { api, ApiError } from "../../lib/api";
 import { currentFix } from "../../lib/geo";
 import { useSession } from "../../session";
 
-export function Register() {
-  const { me, refreshMe, signOut } = useSession();
+export function Register({ onBack }: { onBack: () => void }) {
+  const { me, refreshMe } = useSession();
   const [name, setName] = useState("");
   const [address, setAddress] = useState("");
   const [location, setLocation] = useState<{ lat: number; lng: number }>();
@@ -51,8 +51,8 @@ export function Register() {
       title="Set up your household"
       eyebrow="WELCOME"
       actions={
-        <Button variant="quiet" onClick={signOut}>
-          Sign out
+        <Button variant="quiet" onClick={onBack}>
+          Back
         </Button>
       }
     >

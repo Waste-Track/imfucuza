@@ -142,6 +142,13 @@ export const api = {
     }),
 
   // Riders
+  applyAsRider: (body: {
+    consent_version: string;
+    name: string;
+    payout_phone?: string;
+    tricycle_plate: string;
+    work_area: string;
+  }) => request<{ rider_id: string; status: string }>("/v1/riders/me", { method: "PUT", json: body }),
   setDuty: (onDuty: boolean) =>
     request<{ on_duty: boolean }>("/v1/riders/me/duty", {
       method: "PUT",

@@ -5,7 +5,8 @@ export type Role = "household" | "rider" | "supervisor" | "admin";
 export type Me = {
   role: Role | null;
   name: string | null;
-  status: string | null;
+  // "pending" for a rider waiting for a supervisor to approve the application.
+  status: "pending" | "active" | "suspended" | "deleted" | null;
   household_id: string | null;
   rider_id: string | null;
   on_duty: boolean | null;
@@ -45,6 +46,9 @@ export type PickupView = {
   points_due: number | null;
   verification_outcome: string;
   photo_wanted: boolean;
+  // Only while the rider is on the way or at the door.
+  rider_name: string | null;
+  rider_phone: string | null;
   requested_at: string;
   completed_at: string | null;
 };

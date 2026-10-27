@@ -2,13 +2,14 @@ import { Navigate, Route, Routes } from "react-router";
 import { Alert, Button, Loading, Screen } from "./components/ui";
 import { Account } from "./screens/Account";
 import { SignIn } from "./screens/SignIn";
+import { Welcome } from "./screens/Welcome";
 import { Home } from "./screens/household/Home";
 import { NewRequest } from "./screens/household/NewRequest";
 import { PickupDetail } from "./screens/household/PickupDetail";
 import { PlasticPhoto } from "./screens/household/PlasticPhoto";
 import { Points } from "./screens/household/Points";
-import { Register } from "./screens/household/Register";
 import { Requests } from "./screens/household/Requests";
+import { RiderPending } from "./screens/rider/RiderPending";
 import { RiderHome } from "./screens/rider/RiderHome";
 import { RiderJob } from "./screens/rider/RiderJob";
 import { useSession } from "./session";
@@ -32,13 +33,14 @@ export function App() {
     );
   }
 
+  if (me.role === "rider" && me.status === "pending") return <RiderPending />;
   if (me.status && me.status !== "active") {
     return <Blocked title="Account paused" text="Your account is not active. Call the Imfucuza supervisor in Madina." />;
   }
 
   switch (me.role) {
     case null:
-      return <Register />;
+      return <Welcome />;
     case "household":
       return (
         <Routes>

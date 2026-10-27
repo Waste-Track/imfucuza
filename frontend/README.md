@@ -1,6 +1,6 @@
 # Frontend
 
-One installable PWA for households and smartphone riders, built with React and Vite. Whoever signs in decides which screens open: a phone the Engine knows as a rider gets the rider app, any other phone sets up a household. Riders can't sign themselves up. A supervisor registers them first (`POST /v1/admin/riders`), and their first sign-in links the account.
+One installable PWA for households and smartphone riders, built with React and Vite. Whoever signs in decides which screens open: a household gets the household app and an approved rider the rider app. A new phone chooses between setting up a household and applying as a rider. A rider's application waits for a supervisor to approve it (`PUT /v1/admin/riders/{id}/status`). Riders a supervisor registered directly (`POST /v1/admin/riders`), including feature-phone riders, are linked on their first sign-in.
 
 Screens follow the design canvas "Smart Waste PWA, Rider and USSD Screens". The API contract is the backend's OpenAPI schema at `/openapi.json`.
 

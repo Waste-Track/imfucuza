@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useParams } from "react-router";
+import { Icon } from "../../components/Icon";
 import { PinPad } from "../../components/PinPad";
 import { Alert, Button, ButtonLink, Card, Field, Loading, Screen } from "../../components/ui";
 import { api, ApiError } from "../../lib/api";
@@ -49,10 +50,23 @@ export function PickupDetail() {
 
       {pickup.offering === "plastic" && <PlasticSummary pickup={pickup} />}
 
+      {pickup.rider_phone && (
+        <Card className="row">
+          <span className="avatar" aria-hidden="true">
+            {(pickup.rider_name ?? "R").charAt(0)}
+          </span>
+          <div className="grow">
+            <strong>{pickup.rider_name ?? "Your rider"}</strong>
+            <div className="muted small">Tricycle rider</div>
+          </div>
+          <a className="button button-secondary" href={`tel:${pickup.rider_phone}`}>
+            <Icon name="phone" />
+            Call
+          </a>
+        </Card>
+      )}
       {pickup.status === "assigned" && (
-        <p className="muted">
-          The rider has your number and will call if they need directions. Keep your phone near you.
-        </p>
+        <p className="muted">The rider may call you for directions. Keep your phone near you.</p>
       )}
 
       {pickup.photo_wanted && (

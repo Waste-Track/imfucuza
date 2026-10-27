@@ -2,18 +2,66 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
+from psycopg import errors
 from pydantic import BaseModel, Field, field_validator
 
 from app.api import uploads
 from app.api.common import PinEntry, pin_response
-from app.api.deps import RiderBriefDep, RiderDep
+from app.api.deps import PrincipalDep, RiderBriefDep, RiderDep
 from app.config import get_settings
 from app.db import ConnDep
-from app.domain import dispatch, pickup_flow, pins, plastic
+from app.domain import dispatch, people, pickup_flow, pins, plastic
 
 router = APIRouter(prefix="/v1", tags=["riders"])
+
+
+class RiderApplication(BaseModel):
+    consent_version: str = Field(description="The consent notice version the rider accepted")
+    name: str = Field(min_length=2, max_length=100)
+    # Where earnings are sent. Defaults to the number signed in with.
+    payout_phone: str | None = None
+    tricycle_plate: str = Field(min_length=2, max_length=20)
+    work_area: str = Field(min_length=2, max_length=100)
+
+
+@router.put("/riders/me", status_code=201)
+async def apply(body: RiderApplication, conn: ConnDep, principal: PrincipalDep) -> dict:
+    """A smartphone rider applies. A supervisor approves the application
+    (PUT /v1/admin/riders/{id}/status) before any offers come."""
+    if body.consent_version != get_settings().consent_version:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"accept consent notice {get_settings().consent_version} first",
+        )
+    if not principal.phone:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail="sign in with a phone number")
+    try:
+        phone = people.require_ghana(people.normalize_msisdn(principal.phone))
+        payout = (
+            people.require_ghana(people.normalize_msisdn(body.payout_phone))
+            if body.payout_phone
+            else phone
+        )
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
+    try:
+        rider_id = await people.apply_as_rider(
+            conn,
+            auth_user_id=principal.auth_user_id,
+            phone_e164=phone,
+            name=body.name.strip(),
+            payout_msisdn=payout,
+            tricycle_plate=body.tricycle_plate.strip().upper(),
+            work_area=body.work_area.strip(),
+            consent_version=body.consent_version,
+        )
+    except errors.UniqueViolation as exc:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, detail="this phone number is already registered"
+        ) from exc
+    return {"rider_id": rider_id, "status": "pending"}
 
 
 class Duty(BaseModel):

@@ -170,6 +170,49 @@ async def register_rider(
     return rider_id
 
 
+async def apply_as_rider(
+    conn: Conn,
+    *,
+    auth_user_id: UUID,
+    phone_e164: str,
+    name: str,
+    payout_msisdn: str,
+    tricycle_plate: str,
+    work_area: str,
+    consent_version: str,
+) -> UUID:
+    """A rider applies in the PWA. The account stays pending, so it gets no
+    offers and no rider routes, until a supervisor approves it."""
+    cur = await conn.execute(
+        """
+        insert into engine.users
+            (auth_user_id, role, phone_e164, name, status,
+             consent_version, consent_at, consent_channel)
+        values (%s, 'rider', %s, %s, 'pending', %s, now(), 'pwa')
+        returning id
+        """,
+        (auth_user_id, phone_e164, name, consent_version),
+    )
+    user_id = (await cur.fetchone())["id"]
+    cur = await conn.execute(
+        """
+        insert into engine.riders (user_id, channel, payout_msisdn, tricycle_plate, work_area)
+        values (%s, 'pwa', %s, %s, %s)
+        returning id
+        """,
+        (user_id, payout_msisdn, tricycle_plate, work_area),
+    )
+    rider_id = (await cur.fetchone())["id"]
+    await events.record(
+        conn,
+        "rider.applied",
+        actor_type="rider",
+        actor_id=user_id,
+        payload={"rider_id": str(rider_id)},
+    )
+    return rider_id
+
+
 async def household_id_for(conn: Conn, user_id: UUID) -> UUID | None:
     cur = await conn.execute("select id from engine.households where user_id = %s", (user_id,))
     row = await cur.fetchone()
