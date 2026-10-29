@@ -1,4 +1,5 @@
 import { useState } from "react";
+import heroPhoto from "../assets/landing-hero.jpg";
 import { Icon } from "../components/Icon";
 import { Button } from "../components/ui";
 import { cedis } from "../lib/format";
@@ -31,7 +32,7 @@ export function Landing() {
 
   return (
     <div className="screen landing">
-      <header className="landing-hero">
+      <header className="landing-hero" style={{ backgroundImage: `url(${heroPhoto})` }}>
         <div className="eyebrow light">IMFUCUZA · MADINA, ACCRA</div>
         <h1>Waste collected at your door. Plastic that pays.</h1>
         <p>

@@ -814,9 +814,22 @@ a:focus-visible {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  justify-content: flex-end;
+  min-height: 420px;
   padding: max(40px, env(safe-area-inset-top)) 20px 28px;
-  background: var(--green);
+  background: var(--green) center 30% / cover no-repeat;
   color: #fff;
+  position: relative;
+  isolation: isolate;
+}
+
+/* Darkens the photo towards the text so it stays readable. */
+.landing-hero::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: linear-gradient(180deg, rgb(15 52 33 / 0.25) 0%, rgb(15 52 33 / 0.6) 45%, rgb(15 52 33 / 0.94) 100%);
 }
 
 .landing-hero h1 {
