@@ -426,6 +426,7 @@ async def list_riders(conn: Conn) -> list[dict[str, Any]]:
     cur = await conn.execute(
         """
         select r.id, u.name, u.phone_e164, u.status, r.channel, r.on_duty,
+               r.tricycle_plate, r.work_area,
                r.unreachable_until, r.missed_offers, r.payout_msisdn,
                r.payout_msisdn_changed_at, coalesce(a.balance, 0) as owed_pesewas,
                (select max(received_at) from engine.rider_locations l where l.rider_id = r.id)
@@ -442,17 +443,29 @@ async def list_riders(conn: Conn) -> list[dict[str, Any]]:
 async def set_rider_status(
     conn: Conn, rider_id: UUID, *, active: bool, supervisor_id: UUID
 ) -> None:
+    # A pending rider applied in the PWA: activating approves the application,
+    # suspending turns it down.
     cur = await conn.execute(
         """
-        update engine.users set status = %s
-         where id = (select user_id from engine.riders where id = %s)
-           and status in ('active', 'suspended')
-        returning id
+        update engine.users u set status = %s
+          from engine.users before
+         where u.id = (select user_id from engine.riders where id = %s)
+           and before.id = u.id
+           and u.status in ('pending', 'active', 'suspended')
+        returning u.id, before.status as was
         """,
         ("active" if active else "suspended", rider_id),
     )
-    if await cur.fetchone() is None:
+    updated = await cur.fetchone()
+    if updated is None:
         raise RiderUnavailable("rider not found")
+    if updated["was"] == "pending" and active:
+        await notify.queue_sms(
+            conn,
+            user_id=updated["id"],
+            template="rider_approved",
+            text="Imfucuza: you're approved as a rider. Open the app and go online to get pickups.",
+        )
     if not active:
         # The offer before the rider row, the order accepting an offer takes them in.
         await dispatch.withdraw_rider_offer(conn, rider_id)
@@ -479,7 +492,7 @@ async def set_rider_status(
         "supervisor.rider_status",
         actor_type="supervisor",
         actor_id=supervisor_id,
-        payload={"rider_id": str(rider_id), "active": active},
+        payload={"rider_id": str(rider_id), "active": active, "was": updated["was"]},
     )
 
 

@@ -51,6 +51,8 @@ services:
         sync: false
       - key: USSD_CODE
         sync: false
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false
 
   - type: web
     name: engine
@@ -102,4 +104,6 @@ services:
       - key: USSD_WEBHOOK_TOKEN
         sync: false
       - key: USSD_CODE
+        sync: false
+      - key: CORS_ALLOWED_ORIGINS
         sync: false

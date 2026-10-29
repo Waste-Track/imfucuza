@@ -13,7 +13,16 @@ from app.api.common import PinEntry, pin_response
 from app.api.deps import HouseholdBriefDep, HouseholdDep, PrincipalDep
 from app.config import get_settings
 from app.db import ConnDep
-from app.domain import complaints, payments, people, pickup_flow, pins, plastic, rewards
+from app.domain import (
+    complaints,
+    dispatch,
+    payments,
+    people,
+    pickup_flow,
+    pins,
+    plastic,
+    rewards,
+)
 from app.domain.pickups import Offering
 
 router = APIRouter(prefix="/v1", tags=["households"])
@@ -80,6 +89,10 @@ class PickupView(BaseModel):
     # The rider has weighed the plastic and, on a basic phone, needs the
     # household to send the photo.
     photo_wanted: bool
+    # Only while the rider is on the way or at the door, like the household's
+    # number on the rider's side.
+    rider_name: str | None
+    rider_phone: str | None
     requested_at: datetime
     completed_at: datetime | None
 
@@ -88,10 +101,15 @@ _VIEW = """
     p.id, p.offering, p.status, p.fee_pesewas, p.declared_type, p.weight_g, p.points_due,
     p.verification_outcome, p.requested_at, p.completed_at,
     (p.offering = 'plastic' and p.status = 'arrived' and p.weight_g is not null
-     and coalesce(r.channel = 'ussd', false)) as photo_wanted
+     and coalesce(r.channel = 'ussd', false)) as photo_wanted,
+    case when p.status = any(%(shared)s) then split_part(ru.name, ' ', 1) end as rider_name,
+    case when p.status = any(%(shared)s) then ru.phone_e164 end as rider_phone
     from engine.pickup_requests p
     left join engine.riders r on r.id = p.assigned_rider_id
+    left join engine.users ru on ru.id = r.user_id
 """
+# Statuses in which household and rider can see each other's number.
+_SHARED = list(dispatch.ACTIVE_JOB_STATUSES)
 
 
 @router.post("/pickups", status_code=201)
@@ -133,10 +151,10 @@ async def my_pickups(conn: ConnDep, household: HouseholdDep) -> list[PickupView]
         select """
         + _VIEW
         + """
-         where p.household_id = %s
+         where p.household_id = %(household)s
          order by p.requested_at desc limit 50
         """,
-        (household.household_id,),
+        {"shared": _SHARED, "household": household.household_id},
     )
     return [PickupView(**row) for row in await cur.fetchall()]
 
@@ -241,9 +259,9 @@ async def _view(conn: ConnDep, pickup_id: UUID, household_id: UUID) -> PickupVie
         select """
         + _VIEW
         + """
-         where p.id = %s and p.household_id = %s
+         where p.id = %(pickup)s and p.household_id = %(household)s
         """,
-        (pickup_id, household_id),
+        {"shared": _SHARED, "pickup": pickup_id, "household": household_id},
     )
     row = await cur.fetchone()
     if row is None:

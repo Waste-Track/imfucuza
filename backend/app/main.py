@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app import services
-from app.api import errors, households, internal, riders, supervisor, ussd, webhooks
+from app.api import errors, households, internal, me, riders, supervisor, ussd, webhooks
 from app.config import get_settings
 from app.db import create_pool
 
@@ -69,7 +69,7 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["Authorization", "Content-Type", "Idempotency-Key"],
 )
-for module in (households, riders, supervisor, webhooks, ussd, internal):
+for module in (me, households, riders, supervisor, webhooks, ussd, internal):
     app.include_router(module.router)
 
 

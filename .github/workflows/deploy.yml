@@ -42,7 +42,10 @@ jobs:
       SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
       BACKEND_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_BACKEND }}
       BACKEND_URL: ${{ vars.BACKEND_URL }}
-      FRONTEND_HOOK: ${{ secrets.FRONTEND_DEPLOY_HOOK }}
+      # Read by the Vercel CLI as they are.
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
       INTELLIGENCE_HOOK: ${{ secrets.INTELLIGENCE_DEPLOY_HOOK }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -57,7 +60,7 @@ jobs:
           {
             echo "db=$(ready "$SUPABASE_ACCESS_TOKEN" "$SUPABASE_DB_PASSWORD" "$SUPABASE_PROJECT_REF")"
             echo "backend=$(ready "$BACKEND_HOOK" "$BACKEND_URL")"
-            echo "frontend=$(ready "$FRONTEND_HOOK")"
+            echo "frontend=$(ready "$VERCEL_TOKEN" "$VERCEL_ORG_ID" "$VERCEL_PROJECT_ID")"
             echo "intelligence=$(ready "$INTELLIGENCE_HOOK")"
           } >> "$GITHUB_OUTPUT"
 
@@ -105,9 +108,24 @@ jobs:
             sleep 15
           done
 
+      # Built here from the checked-out commit, so Vercel serves exactly what CI tested.
+      - if: inputs.frontend && steps.config.outputs.frontend == 'true'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: frontend/.nvmrc
       - name: Deploy frontend
         if: inputs.frontend && steps.config.outputs.frontend == 'true'
-        run: curl -fsS -X POST "$FRONTEND_HOOK" -o /dev/null
+        working-directory: frontend
+        env:
+          VERCEL_CLI: vercel@65.2.0
+        run: |
+          # Each GitHub environment has its own Vercel project (VERCEL_PROJECT_ID), so
+          # every deploy goes to that project's production URL: public and stable,
+          # which CORS_ALLOWED_ORIGINS needs. Vercel previews are neither.
+          npx --yes "$VERCEL_CLI" pull --yes --environment=production --token="$VERCEL_TOKEN"
+          npx --yes "$VERCEL_CLI" build --prod --token="$VERCEL_TOKEN"
+          url=$(npx --yes "$VERCEL_CLI" deploy --prebuilt --prod --token="$VERCEL_TOKEN")
+          echo "Frontend deployed: $url" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Deploy intelligence
         if: inputs.intelligence && steps.config.outputs.intelligence == 'true'

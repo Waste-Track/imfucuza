@@ -69,6 +69,10 @@ USSD notes:
 - The mNotify USSD format comes from its spec alone and is untested: confirm session ids and the new-session signal in a sandbox before choosing it.
 - Feature-phone riders pick their location from zones and landmarks. `supabase/seed.sql` loads sample ones locally only. Hosted databases need surveyed ones added through `POST /v1/admin/zones` before USSD riders can be dispatched.
 
+Riders join in one of two ways. A supervisor registers them (`POST /v1/admin/riders`), which is the only way for feature-phone riders. Or a smartphone rider applies in the PWA (`PUT /v1/riders/me`): the account stays `pending`, with no offers and no rider routes, until a supervisor approves it with `PUT /v1/admin/riders/{id}/status` (`active: true`), which also texts the rider. `GET /v1/admin/riders` lists applications with the tricycle plate and work area to check.
+
+While a rider is on the way or at the door, the household sees the rider's first name and number, as the rider sees the household's.
+
 Rider payouts are sent by hand over mobile money. A supervisor requests the payout, a second one approves it if it's over the threshold, someone sends the money to the payout number on the request, then records the MoMo reference. Only that last step touches the ledger.
 
 ## Layout
