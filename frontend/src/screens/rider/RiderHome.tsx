@@ -1,60 +1,48 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { Icon } from "../../components/Icon";
-import { Alert, Button, Card, Screen } from "../../components/ui";
+import { RiderMap } from "../../components/RiderMap";
+import { Alert, Button, Card, RiderNav, Screen } from "../../components/ui";
 import { api, ApiError } from "../../lib/api";
 import { cedis, distance, minutesLeft } from "../../lib/format";
 import type { OfferView } from "../../lib/types";
 import { usePoll } from "../../lib/usePoll";
-import { useRiderLocation } from "../../lib/useRiderLocation";
 import { useMe } from "../../session";
+import { useDuty } from "./duty";
 import { jobHeadline } from "./jobStatus";
 
 export function RiderHome() {
   const me = useMe();
-  const [onDuty, setOnDuty] = useState(Boolean(me.on_duty));
-  const [switching, setSwitching] = useState(false);
-  const [error, setError] = useState<string>();
-  const { problem } = useRiderLocation(onDuty);
+  const duty = useDuty();
   const jobs = usePoll(api.jobs, 10_000);
-  const offers = usePoll(() => (onDuty ? api.offers() : Promise.resolve([])), onDuty ? 5_000 : 0, [onDuty]);
-
-  const toggle = async () => {
-    setSwitching(true);
-    setError(undefined);
-    try {
-      const next = await api.setDuty(!onDuty);
-      setOnDuty(next.on_duty);
-    } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Couldn't change your status.");
-    } finally {
-      setSwitching(false);
-    }
-  };
+  const offers = usePoll(
+    () => (duty.onDuty ? api.offers() : Promise.resolve([])),
+    duty.onDuty ? 5_000 : 0,
+    [duty.onDuty],
+  );
+  const earnings = usePoll(api.earnings, 60_000);
+  const current = jobs.data ?? [];
+  const pins = current.map((job) => ({ lat: job.lat, lng: job.lng, label: jobHeadline(job) }));
 
   return (
     <Screen
       title="Jobs"
       eyebrow={me.name ? `RIDER · ${me.name.toUpperCase()}` : "RIDER"}
-      actions={
-        <Link to="/account" className="icon-button" aria-label="Account">
-          <Icon name="person" />
-        </Link>
-      }
+      actions={<DutyPill />}
+      nav={<RiderNav />}
     >
-      <div className={onDuty ? "duty duty-on" : "duty"}>
-        <div>
-          <strong>{onDuty ? "You are online" : "You are offline"}</strong>
-          <div className="small">{onDuty ? "You'll get offers near you" : "Go online to get offers"}</div>
-        </div>
-        <Button variant={onDuty ? "secondary" : "primary"} busy={switching} onClick={toggle}>
-          {onDuty ? "Go offline" : "Go online"}
-        </Button>
-      </div>
-      {error && <Alert>{error}</Alert>}
-      {problem && <Alert tone="warning">{problem}</Alert>}
+      {duty.error && <Alert>{duty.error}</Alert>}
+      {duty.problem && <Alert tone="warning">{duty.problem}</Alert>}
 
-      {jobs.data?.map((job) => (
+      <RiderMap me={duty.position} pins={pins} />
+
+      <div className="today" aria-label="Today">
+        <Stat label="Jobs today" value={earnings.data ? String(earnings.data.jobs_today) : "…"} />
+        <Stat label="Earned today" value={earnings.data ? cedis(earnings.data.today_pesewas) : "…"} />
+        <Stat label="Owed to you" value={earnings.data ? cedis(earnings.data.owed_pesewas) : "…"} />
+      </div>
+
+      {current.map((job) => (
         <Link key={job.pickup_id} to={`/jobs/${job.pickup_id}`} className="card card-green tap">
           <div className="eyebrow">CURRENT JOB</div>
           <div className="row-between">
@@ -65,12 +53,52 @@ export function RiderHome() {
         </Link>
       ))}
 
-      {onDuty && offers.data?.map((offer) => <Offer key={offer.id} offer={offer} onGone={offers.reload} />)}
+      {duty.onDuty && offers.data?.map((offer) => <Offer key={offer.id} offer={offer} onGone={offers.reload} />)}
 
-      {onDuty && offers.data?.length === 0 && !jobs.data?.length && (
-        <p className="muted center">No offers right now. Keep this screen open.</p>
+      {duty.onDuty && offers.data?.length === 0 && !current.length && (
+        <Card>
+          <strong>Waiting for pickups</strong>
+          <p className="muted small">
+            New pickups near you appear here, and you have a few minutes to accept each one. Keep the app open
+            so we know where you are.
+          </p>
+        </Card>
+      )}
+
+      {!duty.onDuty && !duty.switching && (
+        <Card tone="cream">
+          <strong className="big">You're on a break</strong>
+          <p className="small">You won't get new pickups until you're back online.</p>
+          <Button onClick={() => void duty.setOnDuty(true)}>Go back online</Button>
+        </Card>
+      )}
+
+      {duty.onDuty && (
+        <Button variant="quiet" busy={duty.switching} onClick={() => void duty.setOnDuty(false)}>
+          Take a break
+        </Button>
       )}
     </Screen>
+  );
+}
+
+function DutyPill() {
+  const { onDuty, switching } = useDuty();
+  const text = onDuty ? "Online" : switching ? "Going online…" : "On a break";
+  return (
+    <span className={onDuty ? "status-pill status-pill-on" : "status-pill"} role="status">
+      <span className="status-dot" aria-hidden="true" />
+      {text}
+    </span>
+  );
+}
+
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="stat">
+      <div className="stat-value">{value}</div>
+      <div className="stat-label">{label}</div>
+    </div>
   );
 }
 

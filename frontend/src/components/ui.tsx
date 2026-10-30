@@ -75,6 +75,19 @@ export function HouseholdNav() {
   );
 }
 
+export function RiderNav() {
+  return (
+    <BottomNav
+      items={[
+        { to: "/", label: "Jobs", icon: "map" },
+        { to: "/history", label: "History", icon: "clock" },
+        { to: "/earnings", label: "Earnings", icon: "wallet" },
+        { to: "/account", label: "Account", icon: "person" },
+      ]}
+    />
+  );
+}
+
 export function Button({
   children,
   variant = "primary",

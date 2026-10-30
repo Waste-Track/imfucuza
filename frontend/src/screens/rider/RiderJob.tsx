@@ -3,12 +3,14 @@ import { useParams } from "react-router";
 import { Icon } from "../../components/Icon";
 import { PhotoCapture } from "../../components/PhotoCapture";
 import { PinPad } from "../../components/PinPad";
+import { RiderMap } from "../../components/RiderMap";
 import { Alert, Button, ButtonLink, Card, Field, Loading, Screen } from "../../components/ui";
 import { api, ApiError } from "../../lib/api";
 import { cedis, kg, PLASTIC_LABELS } from "../../lib/format";
 import { currentFix, directionsUrl } from "../../lib/geo";
 import type { JobView } from "../../lib/types";
 import { usePoll } from "../../lib/usePoll";
+import { useDuty } from "./duty";
 import { jobHeadline } from "./jobStatus";
 
 export function RiderJob() {
@@ -16,6 +18,7 @@ export function RiderJob() {
   const [finished, setFinished] = useState(false);
   const { data: jobs, error, reload } = usePoll(api.jobs, 5_000);
   const job = jobs?.find((j) => j.pickup_id === id);
+  const { position } = useDuty();
 
   if (finished || (jobs && !job)) {
     return (
@@ -44,6 +47,7 @@ export function RiderJob() {
   return (
     <Screen title={jobHeadline(job)} back="/">
       {error && <Alert tone="warning">Offline. Showing the last update.</Alert>}
+      <RiderMap me={position} pins={[{ lat: job.lat, lng: job.lng, label: "Pickup" }]} height={220} />
       <JobCard job={job} />
       <Step job={job} onChange={reload} onFinished={() => setFinished(true)} />
     </Screen>

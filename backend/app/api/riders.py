@@ -186,6 +186,102 @@ async def my_jobs(conn: ConnDep, rider: RiderDep) -> list[JobView]:
     return [JobView(**row) for row in await cur.fetchall()]
 
 
+class PastJob(BaseModel):
+    pickup_id: UUID
+    offering: str
+    status: str
+    finished_at: datetime
+    # What the ledger credited the rider for it: 0 unless it was completed.
+    earned_pesewas: int
+
+
+@router.get("/riders/me/history")
+async def my_history(
+    conn: ConnDep, rider: RiderDep, limit: Annotated[int, Query(ge=1, le=100)] = 50
+) -> list[PastJob]:
+    # No address or phone: the rider only needed those while the job was on.
+    cur = await conn.execute(
+        """
+        select p.id as pickup_id, p.offering, p.status,
+               coalesce(p.completed_at, p.updated_at) as finished_at,
+               (select coalesce(sum(e.amount), 0)
+                  from engine.ledger_entries e
+                  join engine.ledger_transactions t on t.id = e.txn_id
+                  join engine.ledger_accounts a on a.id = e.account_id
+                 where t.pickup_id = p.id and a.code = %(account)s and e.side = 'credit')
+                 as earned_pesewas
+          from engine.pickup_requests p
+         where p.assigned_rider_id = %(rider)s and not (p.status = any(%(active)s))
+         order by finished_at desc
+         limit %(limit)s
+        """,
+        {
+            "account": _payable_account(rider.rider_id),
+            "rider": rider.rider_id,
+            "active": list(pickup_flow.ACTIVE_FOR_RIDER),
+            "limit": limit,
+        },
+    )
+    return [PastJob(**row) for row in await cur.fetchall()]
+
+
+class PayoutView(BaseModel):
+    id: UUID
+    amount_pesewas: int
+    status: str
+    created_at: datetime
+    recorded_at: datetime | None
+
+
+class Earnings(BaseModel):
+    # Earned and not yet paid out.
+    owed_pesewas: int
+    today_pesewas: int
+    week_pesewas: int
+    jobs_today: int
+    payout_phone: str | None
+    payouts: list[PayoutView]
+
+
+@router.get("/riders/me/earnings")
+async def my_earnings(conn: ConnDep, rider: RiderDep) -> Earnings:
+    cur = await conn.execute(
+        """
+        select coalesce((select balance from engine.ledger_accounts where code = %(account)s), 0)
+                 as owed_pesewas,
+               coalesce(sum(e.amount) filter (where e.created_at >= date_trunc('day', now())), 0)
+                 as today_pesewas,
+               coalesce(sum(e.amount) filter (where e.created_at >= date_trunc('week', now())), 0)
+                 as week_pesewas,
+               (select count(*) from engine.pickup_requests p
+                 where p.assigned_rider_id = %(rider)s and p.status = 'completed'
+                   and p.completed_at >= date_trunc('day', now())) as jobs_today,
+               (select payout_msisdn from engine.riders where id = %(rider)s) as payout_phone
+          from engine.ledger_entries e
+          join engine.ledger_accounts a on a.id = e.account_id
+         where a.code = %(account)s and e.side = 'credit'
+        """,
+        {"account": _payable_account(rider.rider_id), "rider": rider.rider_id},
+    )
+    totals = await cur.fetchone()
+    cur = await conn.execute(
+        """
+        select id, amount_pesewas, status, created_at, recorded_at
+          from engine.payouts
+         where rider_id = %s
+         order by created_at desc
+         limit 20
+        """,
+        (rider.rider_id,),
+    )
+    payouts = [PayoutView(**row) for row in await cur.fetchall()]
+    return Earnings(**totals, payouts=payouts)
+
+
+def _payable_account(rider_id: UUID) -> str:
+    return f"rider_payable:{rider_id}"
+
+
 @router.post("/pickups/{pickup_id}/arrive")
 async def arrive(pickup_id: UUID, body: Fix, conn: ConnDep, rider: RiderDep) -> dict:
     result = await pickup_flow.arrive(

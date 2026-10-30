@@ -1,11 +1,11 @@
 import { Icon } from "../components/Icon";
-import { Button, Card, HouseholdNav, Screen } from "../components/ui";
+import { Button, Card, HouseholdNav, RiderNav, Screen } from "../components/ui";
 import { useSession } from "../session";
 
 export function Account() {
   const { me, session, signOut } = useSession();
   return (
-    <Screen title="Account" nav={me?.role === "household" ? <HouseholdNav /> : undefined} back={me?.role === "rider" ? "/" : undefined}>
+    <Screen title="Account" nav={me?.role === "household" ? <HouseholdNav /> : me?.role === "rider" ? <RiderNav /> : undefined}>
       <Card>
         <dl className="facts">
           {me?.name && (

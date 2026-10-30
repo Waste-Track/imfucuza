@@ -9,6 +9,9 @@ import { PickupDetail } from "./screens/household/PickupDetail";
 import { PlasticPhoto } from "./screens/household/PlasticPhoto";
 import { Points } from "./screens/household/Points";
 import { Requests } from "./screens/household/Requests";
+import { RiderDutyProvider } from "./screens/rider/duty";
+import { RiderEarnings } from "./screens/rider/RiderEarnings";
+import { RiderHistory } from "./screens/rider/RiderHistory";
 import { RiderPending } from "./screens/rider/RiderPending";
 import { RiderHome } from "./screens/rider/RiderHome";
 import { RiderJob } from "./screens/rider/RiderJob";
@@ -57,12 +60,16 @@ export function App() {
       );
     case "rider":
       return (
-        <Routes>
-          <Route path="/" element={<RiderHome />} />
-          <Route path="/jobs/:id" element={<RiderJob />} />
-          <Route path="/account" element={<Account />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+        <RiderDutyProvider>
+          <Routes>
+            <Route path="/" element={<RiderHome />} />
+            <Route path="/jobs/:id" element={<RiderJob />} />
+            <Route path="/history" element={<RiderHistory />} />
+            <Route path="/earnings" element={<RiderEarnings />} />
+            <Route path="/account" element={<Account />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </RiderDutyProvider>
       );
     case "supervisor":
     case "admin":
