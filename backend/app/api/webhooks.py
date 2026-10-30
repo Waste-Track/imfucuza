@@ -80,7 +80,9 @@ async def supabase_send_sms(request: Request, conn: ConnDep) -> JSONResponse:
         await services.get().sms.send(
             phone, f"Your Imfucuza sign-in code is {otp}. Do not share it with anyone."
         )
-    except ProviderError:
+    except ProviderError as exc:
+        # The gateway's reason, so a failed sign-in can be traced in the logs.
+        log.warning("supabase_sms.send_failed %s", exc)
         return JSONResponse(status_code=502, content={"error": {"message": "SMS unavailable"}})
     await _first_delivery(conn, "supabase_sms", msg_id, "send_sms", msg_id)
     return JSONResponse({})
