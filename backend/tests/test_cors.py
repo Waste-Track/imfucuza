@@ -69,3 +69,19 @@ def test_origins_are_read_as_a_json_list(monkeypatch):
 def test_anything_but_an_exact_origin_is_refused(bad):
     with pytest.raises(ValidationError):
         Settings(_env_file=None, cors_allowed_origins=[bad])
+
+
+def test_a_crash_is_still_readable_by_the_web_app(client):
+    @app.get("/v1/test-crash")
+    async def crash() -> dict:
+        raise RuntimeError("boom")
+
+    app.middleware_stack = None
+    try:
+        response = client.get("/v1/test-crash", headers={"Origin": WEB_APP})
+    finally:
+        app.router.routes.pop()
+
+    assert response.status_code == 500
+    assert response.headers["access-control-allow-origin"] == WEB_APP
+    assert response.json()["detail"].startswith("something went wrong")
