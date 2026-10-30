@@ -22,6 +22,8 @@ from app.adapters.base import (
 )
 
 TIMEOUT_S = 8.0
+# Waking from sleep on Render's free plan takes about 25 s.
+WARM_TIMEOUT_S = 60.0
 RETRY_AFTER_S = 0.5
 # After this many failed calls in a row, stop calling for a while.
 FAILURES_TO_OPEN = 3
@@ -55,6 +57,7 @@ class HttpClassifier:
         if not base_url or not token:
             raise ValueError("the classifier needs a URL and a token")
         self._url = f"{base_url.rstrip('/')}/v1/verify"
+        self._health_url = f"{base_url.rstrip('/')}/health"
         self._token = token
         self._client = client or httpx.AsyncClient(timeout=TIMEOUT_S)
         self._clock = clock
@@ -80,6 +83,13 @@ class HttpClassifier:
             raise ClassifierUnavailable(f"classifier: {type(exc).__name__}") from None
         self._failures = 0
         return result
+
+    async def warm(self) -> None:
+        try:
+            await self._client.get(self._health_url, timeout=WARM_TIMEOUT_S)
+        except httpx.HTTPError:
+            # Nothing to do: the next verify finds out for itself.
+            pass
 
     async def _verify(self, request: VerifyRequest) -> Classification:
         body = {
@@ -148,3 +158,6 @@ class NoClassifier:
 
     async def verify(self, request: VerifyRequest) -> Classification:
         raise ClassifierUnavailable("no classifier is configured")
+
+    async def warm(self) -> None:
+        pass

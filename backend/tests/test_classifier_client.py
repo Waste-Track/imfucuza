@@ -286,3 +286,22 @@ async def test_after_the_pause_one_more_failure_pauses_again():
         await client.verify(verify_request())
 
     assert len(requests) == calls
+
+
+async def test_warming_asks_for_health_without_the_token():
+    cls, requests, _ = classifier(httpx.Response(200, json={"status": "ok"}))
+
+    await cls.warm()
+
+    assert [str(r.url) for r in requests] == ["https://cls.example/health"]
+    assert "authorization" not in requests[0].headers
+
+
+async def test_warming_a_classifier_that_is_down_is_not_an_error():
+    def down(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("refused", request=request)
+
+    cls, _, _ = classifier(down)
+
+    await cls.warm()
+    await NoClassifier().warm()

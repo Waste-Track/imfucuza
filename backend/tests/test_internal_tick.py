@@ -81,3 +81,15 @@ def test_only_ticks_that_fail_reach_the_access_log(path, status, logged):
     )
 
     assert _QuietTicks().filter(record) is logged
+
+
+def test_ticks_keep_the_classifier_awake_without_calling_it_every_time(client_with_secret):
+    from app import services
+
+    with client_with_secret("cron-secret") as client:
+        classifier = services.get().classifier
+        before = classifier.warmed
+        for _ in range(3):
+            client.post("/internal/tick", headers={"X-Internal-Secret": "cron-secret"})
+
+    assert classifier.warmed - before == 1

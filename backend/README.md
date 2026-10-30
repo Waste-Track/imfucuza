@@ -36,7 +36,7 @@ Environment variables, read by `app/config.py`. With `ENVIRONMENT=local` (the de
 | `SMS_GATEWAY`, `MNOTIFY_API_KEY` | `mnotify` and its API key. `SMS_SENDER_ID` defaults to `Imfucuza` |
 | `SUPABASE_SMS_HOOK_SECRET` | The `v1,whsec_...` secret of the Auth "Send SMS" hook |
 | `PHOTO_STORE`, `SUPABASE_SECRET_KEY` | `supabase` and the project's secret key (`sb_secret_...`), for the private `pickup-photos` bucket |
-| `CLASSIFIER`, `CLASSIFIER_URL`, `CLASSIFIER_TOKEN` | `http` with the classifier's base URL and token (contract in [`../spec/classifier-contract.md`](../spec/classifier-contract.md)), or `none` to send every plastic pickup to a supervisor |
+| `CLASSIFIER`, `CLASSIFIER_URL`, `CLASSIFIER_TOKEN` | `http` with the classifier's base URL and token (contract in [`../spec/classifier-contract.md`](../spec/classifier-contract.md)), or `none` to send every plastic pickup to a supervisor. The cron tick pings its `/health` every 10 minutes, so a host that sleeps when idle is awake when a photo comes in |
 | `USSD_PROVIDER`, `USSD_WEBHOOK_TOKEN`, `USSD_CODE` | Optional. The one USSD provider accepted (`africastalking`, `arkesel` or `mnotify`), the 32+ character secret it calls at `POST /webhooks/ussd/{provider}/{token}`, and the code shown in SMS. USSD is off until all three are set |
 | `CORS_ALLOWED_ORIGINS` | Optional. JSON list of web app origins browsers may call the API from, e.g. `["https://imfucuza.vercel.app"]`. Empty blocks all browser calls from other sites |
 | `USSD_ALLOWED_IPS`, `TRUST_FORWARDED_FOR` | Optional. Addresses the USSD provider calls from, and whether to read the caller from `X-Forwarded-For` (true behind Render) |

@@ -55,6 +55,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Photos are processed one at a time, off the event loop.
     app.state.photo_limiter = anyio.CapacityLimiter(1)
     app.state.last_tick_at = None
+    app.state.classifier_warmed_at = None
+    # Strong references, or the event loop may drop a task before it finishes.
+    app.state.background_tasks = set()
     try:
         yield
     finally:
