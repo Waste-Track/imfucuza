@@ -41,11 +41,13 @@ def test_signed_hook_sends_the_code_by_sms(hooked):
     assert "561166" in hooked.sms.messages_to("+233241234567")[0]
 
 
-def test_a_retry_after_a_failed_send_still_sends_the_code(hooked):
+def test_a_retry_after_a_failed_send_still_sends_the_code(hooked, caplog):
     headers = signed(BODY)
     hooked.sms.fail_next_send = True
 
-    first = hooked.client.post("/hooks/supabase/send-sms", content=BODY, headers=headers)
+    with caplog.at_level("WARNING", logger="app.api.webhooks"):
+        first = hooked.client.post("/hooks/supabase/send-sms", content=BODY, headers=headers)
+    assert "supabase_sms.send_failed" in caplog.text
     retry = hooked.client.post("/hooks/supabase/send-sms", content=BODY, headers=headers)
     replay = hooked.client.post("/hooks/supabase/send-sms", content=BODY, headers=headers)
 
