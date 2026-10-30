@@ -9,8 +9,12 @@ const MAX_BATCH = 100;
  * While on duty, watch the phone's GPS and send fixes in batches, so dispatch
  * can find the nearest rider. Fixes taken offline are kept and sent later.
  */
-export function useRiderLocation(onDuty: boolean): { problem: string | undefined } {
+export function useRiderLocation(onDuty: boolean): {
+  problem: string | undefined;
+  position: Fix | undefined;
+} {
   const [problem, setProblem] = useState<string>();
+  const [position, setPosition] = useState<Fix>();
   const pending = useRef<Fix[]>([]);
 
   useEffect(() => {
@@ -35,7 +39,9 @@ export function useRiderLocation(onDuty: boolean): { problem: string | undefined
     const watch = navigator.geolocation.watchPosition(
       (position) => {
         setProblem(undefined);
-        pending.current.push(toFix(position));
+        const fix = toFix(position);
+        setPosition(fix);
+        pending.current.push(fix);
         if (first) {
           first = false;
           void flush();
@@ -57,5 +63,5 @@ export function useRiderLocation(onDuty: boolean): { problem: string | undefined
     };
   }, [onDuty]);
 
-  return { problem: onDuty ? problem : undefined };
+  return { problem: onDuty ? problem : undefined, position: onDuty ? position : undefined };
 }

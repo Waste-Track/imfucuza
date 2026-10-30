@@ -184,6 +184,11 @@ textarea {
   padding: 8px 20px 16px;
 }
 
+.pad-x {
+  padding-left: 20px;
+  padding-right: 20px;
+}
+
 /* Text -------------------------------------------------------------------- */
 
 .eyebrow {
@@ -667,19 +672,60 @@ a:focus-visible {
 
 /* Rider ------------------------------------------------------------------- */
 
-.duty {
-  display: flex;
+.status-pill {
+  display: inline-flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 14px 16px;
-  border-radius: var(--radius);
-  background: #e8ede6;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: var(--cream);
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 700;
+  white-space: nowrap;
 }
 
-.duty-on {
+.status-pill-on {
   background: var(--green-soft);
-  color: #174d33;
+  color: var(--green);
+}
+
+.status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.map {
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: #dce8dd;
+  /* Keeps Leaflet's panes under the bottom nav. */
+  isolation: isolate;
+}
+
+.today {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.stat {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.stat-value {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.stat-label {
+  color: var(--muted);
+  font-size: 13px;
 }
 
 /* PIN --------------------------------------------------------------------- */

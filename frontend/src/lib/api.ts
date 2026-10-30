@@ -1,10 +1,12 @@
 import { supabase } from "./supabase";
 import type {
+  Earnings,
   JobView,
   LeaderboardView,
   Me,
   Network,
   OfferView,
+  PastJob,
   PaymentStarted,
   PickupView,
   Points,
@@ -161,6 +163,8 @@ export const api = {
     request<{ pickup_id: string }>(`/v1/offers/${offerId}/accept`, { method: "POST" }),
   decline: (offerId: string) => request(`/v1/offers/${offerId}/decline`, { method: "POST" }),
   jobs: () => request<JobView[]>("/v1/riders/me/jobs"),
+  history: () => request<PastJob[]>("/v1/riders/me/history"),
+  earnings: () => request<Earnings>("/v1/riders/me/earnings"),
   arrive: (pickupId: string, fix: Fix) =>
     request(`/v1/pickups/${pickupId}/arrive`, { method: "POST", json: fix }),
   collected: (pickupId: string) => request(`/v1/pickups/${pickupId}/collected`, { method: "POST" }),

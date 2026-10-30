@@ -8,6 +8,8 @@ New visitors land on a page that explains the service and offers "Get my waste c
 
 ## Supervisor console
 
+Riders are online whenever the app is open: opening it puts them on duty and shares their location on every rider screen, so dispatch can reach them, and "Take a break" stops new offers until they come back or next open the app. The Jobs tab has a map of the rider and their pickups (OpenStreetMap tiles through Leaflet), today's jobs and earnings, and the offers. History lists finished jobs with what each earned, and Earnings shows what's owed and the payouts made.
+
 Supervisors and admins who sign in get the console instead: a desktop-first page (it also works on a phone) with the review queue (claim an item, see the pickup, photos, photo check and timeline, then act and resolve), rider applications and rider management (approve, suspend, payouts, payout number, registering feature-phone riders), payouts waiting for approval or to record, complaint decisions waiting for a second supervisor, zones and landmarks, and rewards (vouchers, partner shops, monthly shop report).
 
 A supervisor account is created in the database, once per person, and linked on their first sign-in with that number:
@@ -68,7 +70,7 @@ The app shell is cached, so it opens without a connection. The last pickups, poi
 | `src/lib/api.ts`, `types.ts` | Engine calls and the shapes they return |
 | `src/lib/pickupStatus.ts` | What each pickup status means to a household |
 | `src/screens/household/` | Home, new request, payment, status and PIN, plastic photo, points and vouchers |
-| `src/screens/rider/` | Duty and offers, then the job: arrive, collect or weigh and photograph, decide, enter PIN |
+| `src/screens/rider/` | Jobs (map, today's numbers, offers), history, earnings, then the job: arrive, collect or weigh and photograph, decide, enter PIN |
 | `src/components/` | Shared UI, the PIN pad and photo capture |
 
 ## What CI runs

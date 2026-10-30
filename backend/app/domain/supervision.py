@@ -464,7 +464,7 @@ async def set_rider_status(
             conn,
             user_id=updated["id"],
             template="rider_approved",
-            text="Imfucuza: you're approved as a rider. Open the app and go online to get pickups.",
+            text="Imfucuza: you're approved as a rider. Open the app to start getting pickups.",
         )
     if not active:
         # The offer before the rider row, the order accepting an offer takes them in.

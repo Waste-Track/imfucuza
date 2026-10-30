@@ -103,6 +103,31 @@ export type OfferView = {
   pay_per_kg_pesewas: number | null;
 };
 
+export type PastJob = {
+  pickup_id: string;
+  offering: Offering;
+  status: PickupStatus;
+  finished_at: string;
+  earned_pesewas: number;
+};
+
+export type Payout = {
+  id: string;
+  amount_pesewas: number;
+  status: "pending_approval" | "approved" | "recorded" | "rejected";
+  created_at: string;
+  recorded_at: string | null;
+};
+
+export type Earnings = {
+  owed_pesewas: number;
+  today_pesewas: number;
+  week_pesewas: number;
+  jobs_today: number;
+  payout_phone: string | null;
+  payouts: Payout[];
+};
+
 export type JobView = {
   pickup_id: string;
   offering: Offering;
