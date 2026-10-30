@@ -22,9 +22,11 @@ services:
         value: mnotify
       - key: PHOTO_STORE
         value: supabase
-      # Every plastic pickup goes to a supervisor until the classifier is deployed.
       - key: CLASSIFIER
-        value: none
+        value: http
+      # Hosted on another Render account, shared by staging and production.
+      - key: CLASSIFIER_URL
+        value: https://classifier-staging.onrender.com
       - key: DATABASE_URL
         sync: false
       - key: SUPABASE_URL
@@ -40,8 +42,6 @@ services:
       - key: SUPABASE_SMS_HOOK_SECRET
         sync: false
       - key: SUPABASE_SECRET_KEY
-        sync: false
-      - key: CLASSIFIER_URL
         sync: false
       - key: CLASSIFIER_TOKEN
         sync: false
@@ -76,9 +76,11 @@ services:
         value: mnotify
       - key: PHOTO_STORE
         value: supabase
-      # Every plastic pickup goes to a supervisor until the classifier is deployed.
       - key: CLASSIFIER
-        value: none
+        value: http
+      # Hosted on another Render account, shared by staging and production.
+      - key: CLASSIFIER_URL
+        value: https://classifier-staging.onrender.com
       - key: DATABASE_URL
         sync: false
       - key: SUPABASE_URL
@@ -94,8 +96,6 @@ services:
       - key: SUPABASE_SMS_HOOK_SECRET
         sync: false
       - key: SUPABASE_SECRET_KEY
-        sync: false
-      - key: CLASSIFIER_URL
         sync: false
       - key: CLASSIFIER_TOKEN
         sync: false

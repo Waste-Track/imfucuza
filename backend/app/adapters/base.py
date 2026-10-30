@@ -225,3 +225,6 @@ class Classifier(Protocol):
     name: str
 
     async def verify(self, request: VerifyRequest) -> Classification: ...
+
+    async def warm(self) -> None:
+        """Wake the classifier if its host has put it to sleep. Never raises."""

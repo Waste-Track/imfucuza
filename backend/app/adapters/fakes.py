@@ -169,6 +169,10 @@ class FakeClassifier:
     name: str = "fake"
     requests: list[VerifyRequest] = field(default_factory=list)
     queued: list[tuple[Verdict, float, VerdictReason] | Exception] = field(default_factory=list)
+    warmed: int = 0
+
+    async def warm(self) -> None:
+        self.warmed += 1
 
     async def verify(self, request: VerifyRequest) -> Classification:
         self.requests.append(request)
