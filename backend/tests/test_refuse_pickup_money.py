@@ -110,14 +110,16 @@ def test_paying_again_after_completion_is_refunded(world):
     assert world.db.all("select * from engine.ledger_reconcile()") == []
 
 
-def test_charge_refused_at_start_does_not_block_the_payment_window(world):
+def test_charge_refused_at_start_does_not_block_the_payment_window(world, caplog):
     household = world.household()
     pickup_id = world.request_pickup(household)
     world.payments.failures["start_momo_charge"] = ProviderError("invalid number", retryable=False)
 
-    started = world.client.post(
-        f"/v1/pickups/{pickup_id}/payment", headers=household.headers, json={"network": "mtn"}
-    )
+    with caplog.at_level("WARNING", logger="app.api.errors"):
+        started = world.client.post(
+            f"/v1/pickups/{pickup_id}/payment", headers=household.headers, json={"network": "mtn"}
+        )
+    assert "provider_error POST" in caplog.text and "invalid number" in caplog.text
     world.make_due("payment.expire")
     world.tick()
 

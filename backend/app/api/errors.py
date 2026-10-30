@@ -1,6 +1,8 @@
 """Domain exceptions as HTTP responses. Raising rolls the request's
 transaction back, so nothing a failed request did is kept."""
 
+import logging
+
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from psycopg import errors as pg
@@ -21,6 +23,8 @@ from app.domain.pins import PinLocked, PinUnavailable, TooManyAttempts
 from app.domain.plastic import NothingToDecide, WeightOutOfRange
 from app.domain.rewards import NameTaken, NotEnoughPoints, ProductUnavailable, TooManyVouchers
 from app.domain.supervision import PayoutNotAllowed, ReviewItemUnavailable, RiderUnavailable
+
+log = logging.getLogger(__name__)
 
 _STATUS: list[tuple[type[Exception], int]] = [
     (NotYourPickup, 404),
@@ -65,6 +69,8 @@ def install(app: FastAPI) -> None:
 def _handler(status: int):
     async def handle(request: Request, exc: Exception) -> JSONResponse:
         if status == 502:
+            # The provider's reason stays out of the reply but goes in the logs.
+            log.warning("provider_error %s %s: %s", request.method, request.url.path, exc)
             detail = "payment provider unavailable, try again"
         elif isinstance(exc, pg.Error):
             detail = "the request clashed with another one, try again"
