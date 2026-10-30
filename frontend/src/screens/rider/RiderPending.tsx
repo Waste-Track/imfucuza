@@ -18,12 +18,11 @@ export function RiderPending() {
       <Card tone="green">
         <div className="row">
           <Icon name="clock" size={32} />
-          <strong className="big">Waiting for a supervisor</strong>
+          <strong className="big">Waiting for approval</strong>
         </div>
         <p>
-          {me?.name ? `Thanks, ${me.name.split(" ")[0]}. ` : ""}A supervisor will check your details
-          and tricycle, usually in person. You'll get an SMS when you're approved, then you can go
-          online and get jobs.
+          {me?.name ? `Thanks, ${me.name.split(" ")[0]}. ` : ""}Your registration has been received.
+          You'll get an SMS when you're approved.
         </p>
       </Card>
       <Button variant="secondary" busy={checking} onClick={check}>

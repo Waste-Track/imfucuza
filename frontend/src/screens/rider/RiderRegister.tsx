@@ -93,8 +93,8 @@ export function RiderRegister({ onBack }: { onBack: () => void }) {
           Submit for approval
         </Button>
         <p className="hint">
-          A supervisor checks your details and tricycle before you get jobs. No smartphone? Ask the
-          Imfucuza supervisor to register you for the USSD menu.
+          Your details will be checked once you submit. We'll notify you by SMS when you're
+          approved.
         </p>
       </form>
     </Screen>
