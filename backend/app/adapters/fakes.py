@@ -10,6 +10,8 @@ from uuid import uuid4
 from app.adapters.base import (
     ChargeStarted,
     ChargeState,
+    Checkout,
+    CheckoutStarted,
     Classification,
     DeliveryState,
     InvalidWebhook,
@@ -33,7 +35,7 @@ FAKE_WEBHOOK_SECRET = b"fake-payment-webhook-secret"
 class FakePaymentProvider:
     name: str = "fake"
     fee_percent: float = 1.95
-    charges: dict[str, MomoCharge] = field(default_factory=dict)
+    charges: dict[str, MomoCharge | Checkout] = field(default_factory=dict)
     states: dict[str, ChargeState] = field(default_factory=dict)
     refunds: list[tuple[str, int]] = field(default_factory=list)
     refund_states: dict[str, RefundState] = field(default_factory=dict)
@@ -47,6 +49,12 @@ class FakePaymentProvider:
         return ChargeStarted(
             charge.reference, ChargeState.PENDING, "Approve the prompt on your phone"
         )
+
+    async def start_checkout(self, checkout: Checkout) -> CheckoutStarted:
+        self._maybe_fail("start_checkout")
+        self.charges[checkout.reference] = checkout
+        self.states.setdefault(checkout.reference, ChargeState.PENDING)
+        return CheckoutStarted(checkout.reference, f"ac_{checkout.reference}")
 
     async def submit_otp(self, reference: str, otp: str) -> ChargeStarted:
         self._maybe_fail("submit_otp")

@@ -17,6 +17,8 @@ from app import jobs, services
 from app.adapters.base import (
     ChargeStarted,
     ChargeState,
+    Checkout,
+    CheckoutStarted,
     MomoCharge,
     Network,
     PaymentEventKind,
@@ -33,6 +35,8 @@ log = logging.getLogger(__name__)
 # A mobile money prompt the payer hasn't answered by now has lapsed on their
 # phone, so a fresh one is allowed even if the provider still calls it pending.
 PROMPT_LAPSES_AFTER = timedelta(minutes=3)
+# Reopening the checkout window within this time resumes the same transaction.
+CHECKOUT_RESUMABLE_FOR = timedelta(minutes=30)
 # Refund jobs keep trying for hours, not minutes, before a person is asked.
 REFUND_MAX_ATTEMPTS = 12
 
@@ -51,39 +55,14 @@ async def start_payment(
     """Ask the household's network to charge the fee. The charge request itself
     is never made inside a database transaction."""
     async with pool.connection() as conn:
-        cur = await conn.execute(
-            """
-            select 1 from engine.pickup_requests p
-              join engine.households h on h.id = p.household_id
-             where p.id = %s and h.user_id = %s
-            """,
-            (pickup_id, household_user_id),
-        )
-        if await cur.fetchone() is None:
-            raise LookupError("pickup not found")
-        pending = await _pending_collections_on(conn, pickup_id)
+        pending = await _owned_pending_collections(conn, pickup_id, household_user_id)
     # A prompt still waiting would charge twice if we sent another: settle it first.
     for reference in pending:
         async with pool.connection() as conn, conn.transaction():
             await settle_collection(conn, reference)
 
     async with pool.connection() as conn, conn.transaction():
-        cur = await conn.execute(
-            """
-            select p.status, p.fee_pesewas, u.phone_e164
-              from engine.pickup_requests p
-              join engine.households h on h.id = p.household_id
-              join engine.users u on u.id = h.user_id
-             where p.id = %s and u.id = %s
-               for no key update of p
-            """,
-            (pickup_id, household_user_id),
-        )
-        row = await cur.fetchone()
-        if row is None:
-            raise LookupError("pickup not found")
-        if row["status"] != Status.AWAITING_PAYMENT:
-            raise PaymentNotAllowed(f"pickup is {row['status']}, not awaiting payment")
+        row = await _lock_unpaid_pickup(conn, pickup_id, household_user_id)
         cur = await conn.execute(
             """
             select 1 from engine.payments
@@ -125,6 +104,123 @@ async def start_payment(
         async with pool.connection() as conn, conn.transaction():
             await jobs.enqueue(conn, "payment.settle", {"reference": reference})
     return started
+
+
+async def start_checkout(
+    pool: AsyncConnectionPool[Conn], *, pickup_id: UUID, household_user_id: UUID
+) -> CheckoutStarted:
+    """Set up a transaction for the provider's checkout window, or hand back
+    the one already open so reopening the window can't charge twice."""
+    async with pool.connection() as conn:
+        pending = await _owned_pending_collections(conn, pickup_id, household_user_id)
+    # One may have been paid already, and the pickup moved on with it.
+    for reference in pending:
+        async with pool.connection() as conn, conn.transaction():
+            await settle_collection(conn, reference)
+
+    async with pool.connection() as conn, conn.transaction():
+        row = await _lock_unpaid_pickup(conn, pickup_id, household_user_id)
+        cur = await conn.execute(
+            """
+            select reference, checkout_code from engine.payments
+             where pickup_id = %s and direction = 'collection' and status = 'pending'
+               and checkout_code is not null and created_at > now() - %s
+             order by created_at desc
+             limit 1
+            """,
+            (pickup_id, CHECKOUT_RESUMABLE_FOR),
+        )
+        open_checkout = await cur.fetchone()
+        if open_checkout:
+            return CheckoutStarted(open_checkout["reference"], open_checkout["checkout_code"])
+        reference = f"imf_{uuid4().hex}"
+        await conn.execute(
+            """
+            insert into engine.payments (pickup_id, direction, provider, reference, amount_pesewas)
+            values (%s, 'collection', %s, %s, %s)
+            """,
+            (pickup_id, services.get().payments.name, reference, row["fee_pesewas"]),
+        )
+
+    checkout = Checkout(
+        reference=reference,
+        amount_pesewas=row["fee_pesewas"],
+        email=f"{household_user_id}@{get_settings().payer_email_domain}",
+        phone_e164=row["phone_e164"],
+    )
+    try:
+        started = await services.get().payments.start_checkout(checkout)
+    except ProviderError as exc:
+        if not exc.retryable:
+            await _mark_collection(pool, reference, "failed")
+        raise
+    async with pool.connection() as conn:
+        await conn.execute(
+            "update engine.payments set checkout_code = %s, updated_at = now() where reference = %s"
+            " and direction = 'collection'",
+            (started.access_code, reference),
+        )
+    return started
+
+
+async def check_collection(
+    pool: AsyncConnectionPool[Conn], *, pickup_id: UUID, household_id: UUID, reference: str
+) -> str:
+    """Settle a collection now, when the checkout window says it was paid,
+    instead of waiting for the webhook. Returns the pickup's status."""
+    async with pool.connection() as conn, conn.transaction():
+        cur = await conn.execute(
+            """
+            select 1 from engine.payments pay
+              join engine.pickup_requests p on p.id = pay.pickup_id
+             where pay.reference = %s and pay.direction = 'collection'
+               and p.id = %s and p.household_id = %s
+            """,
+            (reference, pickup_id, household_id),
+        )
+        if await cur.fetchone() is None:
+            raise LookupError("payment not found")
+        await settle_collection(conn, reference)
+        cur = await conn.execute(
+            "select status from engine.pickup_requests where id = %s", (pickup_id,)
+        )
+        return (await cur.fetchone())["status"]
+
+
+async def _owned_pending_collections(
+    conn: Conn, pickup_id: UUID, household_user_id: UUID
+) -> list[str]:
+    cur = await conn.execute(
+        """
+        select 1 from engine.pickup_requests p
+          join engine.households h on h.id = p.household_id
+         where p.id = %s and h.user_id = %s
+        """,
+        (pickup_id, household_user_id),
+    )
+    if await cur.fetchone() is None:
+        raise LookupError("pickup not found")
+    return await _pending_collections_on(conn, pickup_id)
+
+
+async def _lock_unpaid_pickup(conn: Conn, pickup_id: UUID, household_user_id: UUID) -> dict:
+    cur = await conn.execute(
+        """
+        select p.status, p.fee_pesewas, u.phone_e164
+          from engine.pickup_requests p
+          join engine.households h on h.id = p.household_id
+          join engine.users u on u.id = h.user_id
+         where p.id = %s and u.id = %s
+           for no key update of p
+        """,
+        (pickup_id, household_user_id),
+    )
+    row = await cur.fetchone()
+    if row is None:
+        raise LookupError("pickup not found")
+    if row["status"] != Status.AWAITING_PAYMENT:
+        raise PaymentNotAllowed(f"pickup is {row['status']}, not awaiting payment")
+    return row
 
 
 async def submit_otp(
