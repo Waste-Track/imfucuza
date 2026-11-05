@@ -524,3 +524,39 @@ def test_refund_webhook_carries_the_refund_id_when_paystack_sends_one():
     assert provider.parse_webhook(*signed(with_id)).provider_object_id == "3018284"
     # Paystack's sample event has no id. The Engine then uses the id it stored.
     assert provider.parse_webhook(*signed(REFUND_PROCESSED)).provider_object_id is None
+
+
+# Checkout window -------------------------------------------------------------
+
+
+async def test_checkout_initializes_a_mobile_money_only_transaction():
+    from app.adapters.base import Checkout
+
+    provider, requests = paystack(
+        ok({"authorization_url": "https://checkout.paystack.com/x", "access_code": "ac_1"})
+    )
+
+    started = await provider.start_checkout(
+        Checkout("pay-123", 1000, "u1@payers.imfucuza.app", "+233241234567")
+    )
+
+    [request] = requests
+    assert request.url == "https://api.paystack.co/transaction/initialize"
+    assert json.loads(request.content) == {
+        "email": "u1@payers.imfucuza.app",
+        "amount": 1000,
+        "currency": "GHS",
+        "reference": "pay-123",
+        "channels": ["mobile_money"],
+        "metadata": {"phone": "+233241234567"},
+    }
+    assert (started.reference, started.access_code) == ("pay-123", "ac_1")
+
+
+async def test_checkout_without_an_access_code_is_a_provider_error():
+    from app.adapters.base import Checkout
+
+    provider, _ = paystack(ok({"authorization_url": "https://checkout.paystack.com/x"}))
+
+    with pytest.raises(ProviderError, match="no access code"):
+        await provider.start_checkout(Checkout("pay-123", 1000, "u1@x", "+233241234567"))

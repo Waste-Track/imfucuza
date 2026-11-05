@@ -51,6 +51,24 @@ class MomoCharge:
 
 
 @dataclass(frozen=True)
+class Checkout:
+    """A payment the payer completes in the provider's own checkout window,
+    which asks for their network and number itself."""
+
+    reference: str
+    amount_pesewas: int
+    email: str
+    phone_e164: str
+
+
+@dataclass(frozen=True)
+class CheckoutStarted:
+    reference: str
+    # Opens the provider's checkout window for this transaction.
+    access_code: str
+
+
+@dataclass(frozen=True)
 class ChargeStarted:
     reference: str
     state: ChargeState
@@ -113,6 +131,8 @@ class PaymentProvider(Protocol):
     async def start_momo_charge(self, charge: MomoCharge) -> ChargeStarted: ...
 
     async def submit_otp(self, reference: str, otp: str) -> ChargeStarted: ...
+
+    async def start_checkout(self, checkout: Checkout) -> CheckoutStarted: ...
 
     async def verify_charge(self, reference: str) -> VerifiedCharge:
         """Ask the provider for the charge's real state. Never trust a webhook

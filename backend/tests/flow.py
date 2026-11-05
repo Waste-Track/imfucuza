@@ -5,6 +5,7 @@ Jobs run through POST /internal/tick, the same way Supabase Cron runs them.
 
 import random
 import re
+import secrets
 from dataclasses import dataclass, field
 from io import BytesIO
 from uuid import UUID, uuid4
@@ -41,7 +42,9 @@ def principal_from_headers(request: Request) -> Principal:
 
 
 def random_phone() -> str:
-    return "+2335" + str(uuid4().int)[:8]
+    # Even digits, and more than a real number has, so numbers don't collide
+    # with the users earlier runs left in the local database.
+    return f"+2335{secrets.randbelow(10**10):010d}"
 
 
 def offset(point: tuple[float, float], metres_north: float) -> tuple[float, float]:

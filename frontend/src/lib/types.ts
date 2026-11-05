@@ -56,15 +56,6 @@ export type PickupView = {
 
 export type PlasticType = "pet" | "hdpe" | "pp" | "mixed_plastic";
 
-export type Network = "mtn" | "telecel" | "airteltigo";
-
-export type PaymentStarted = {
-  reference: string;
-  state: "pending" | "succeeded" | "failed" | string;
-  display_text: string | null;
-  needs_otp: boolean;
-};
-
 export type Points = { available: number; pending: number };
 
 export type LeaderboardView = {

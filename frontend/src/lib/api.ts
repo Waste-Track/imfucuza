@@ -4,10 +4,8 @@ import type {
   JobView,
   LeaderboardView,
   Me,
-  Network,
   OfferView,
   PastJob,
-  PaymentStarted,
   PickupView,
   Points,
   Product,
@@ -104,12 +102,11 @@ export const api = {
   ) => request<PickupView>("/v1/pickups", { method: "POST", json: body, idempotencyKey }),
   pickups: () => request<PickupView[]>("/v1/pickups"),
   pickup: (id: string) => request<PickupView>(`/v1/pickups/${id}`),
-  pay: (id: string, network: Network) =>
-    request<PaymentStarted>(`/v1/pickups/${id}/payment`, { method: "POST", json: { network } }),
-  payOtp: (id: string, reference: string, otp: string) =>
-    request<PaymentStarted>(`/v1/pickups/${id}/payment/otp`, {
+  checkout: (id: string) =>
+    request<{ reference: string; access_code: string }>(`/v1/pickups/${id}/checkout`, { method: "POST" }),
+  checkPayment: (id: string, reference: string) =>
+    request<{ status: string }>(`/v1/pickups/${id}/payment/${encodeURIComponent(reference)}/check`, {
       method: "POST",
-      json: { reference, otp },
     }),
   cancel: (id: string) =>
     request<{ refund_started: boolean }>(`/v1/pickups/${id}/cancel`, { method: "POST" }),
