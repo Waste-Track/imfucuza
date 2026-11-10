@@ -1,4 +1,4 @@
-"""Plastic collection (engine-design.md sections 1 and 5). The rider weighs
+"""Plastic collection (spec/features/plastic-collection). The rider weighs
 and photographs the plastic, the classifier and the Engine's policy decide,
 and the household's PIN turns an accepted check into points and rider pay.
 
@@ -598,7 +598,7 @@ async def rider_decides(
     )
     if accept and overrides:
         # Riders are paid for what they accept, so an override waits for a
-        # person until override rates are monitored (engine-design.md section 6).
+        # person until override rates are monitored (threat model T7).
         await _to_supervisor(
             conn, pickup, "the rider accepted plastic the check leant towards rejecting"
         )

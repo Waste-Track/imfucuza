@@ -3,6 +3,24 @@
 
 Later milestones amend this document rather than replace it. Record each amendment in the [change log](#14-change-log).
 
+This folder drives the work:
+
+| File | What it holds |
+| --- | --- |
+| [mission.md](mission.md) | Why Imfucuza exists, who it serves, pilot goals and principles |
+| [roadmap.md](roadmap.md) | What's done, what's next, in order |
+| [tech-stack.md](tech-stack.md) | What it's built with, where it runs, and the rules every change follows |
+| [policy.md](policy.md) | Fees, payouts, limits and personal data rules |
+| [discussions.md](discussions.md) | Decisions with their reasons, and open questions |
+| [threat-model.md](threat-model.md) | How the system could be cheated, and what stops it |
+| [features/](features/README.md) | One spec per feature |
+| This file | The scope and architecture specification |
+| [classifier-contract.md](classifier-contract.md) | The HTTP contract between the Engine and the classifier |
+
+How agents and people use these files is in [AGENTS.md](../AGENTS.md).
+
+Older migrations cite `engine-design.md` and `engine-plan.md`, which were never committed. Judging by what the citing code does, their sections now live in the feature specs: 1 pickup lifecycle ([paid pickup](features/paid-pickup/spec.md)), 2 [dispatch](features/dispatch/spec.md), 3 PINs ([paid pickup](features/paid-pickup/spec.md)), 4 money and rewards ([paid pickup](features/paid-pickup/spec.md), [rewards](features/rewards/spec.md)), 5 verification ([plastic collection](features/plastic-collection/spec.md), [waste classifier](features/waste-classifier/spec.md)), 6 review and complaints ([complaints](features/complaints/spec.md), [supervisor console](features/supervisor-console/spec.md)), 8 SMS, and 10 [USSD](features/feature-phone-ussd/spec.md). `engine-plan.md` covered the payment model ([discussions](discussions.md#2026-10-paystack-for-payments)) and starting prices ([policy](policy.md)).
+
 ## 1. Problem and users
 
 Households in Madina, Accra, cannot get waste collected reliably. Formal waste companies run fixed routes that miss whole streets. Informal aboboyaa (tricycle) riders fill part of the gap, but nothing confirms a rider is available, agrees a fair outcome, or proves a pickup happened. Households with sorted plastic have no dependable way to be rewarded for it. Recyclers receive mixed, contaminated material.
@@ -114,7 +132,7 @@ Fraud controls: escrow captured only on household PIN confirmation, branded coll
 ## 10. Operational dependencies
 
 - mNotify for SMS and USSD delivery.
-- A payment provider for escrow authorisation, capture and release. Not yet chosen.
+- Paystack for mobile money collections and refunds. Escrow is held in the Engine's own ledger ([discussions](discussions.md#2026-10-paystack-for-payments)).
 - Supervisor capacity for escalations, disputes and audit sampling.
 - Recycling partners for downstream contamination reports.
 
@@ -152,3 +170,4 @@ Confident false accepts and collusion fire none of these signals on a single tra
 | Milestone | Change |
 | --- | --- |
 | M1 | Initial scope and architecture. Decisions: rule-based dispatch, pickup mismatch split into location and material cases, separate false-accept and false-reject rates. |
+| 2026-11 | Payment provider chosen: Paystack, with escrow in the Engine's ledger (section 10). Mission, roadmap, tech stack, policy, discussions and feature specs added alongside this document. |

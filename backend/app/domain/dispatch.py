@@ -1,5 +1,5 @@
 """Rule-based dispatch: offer each pickup to the nearest available rider
-(engine-design.md section 2). Every round is logged in full so a learned
+(spec/features/dispatch). Every round is logged in full so a learned
 router can later be trained, and judged, against it."""
 
 import math

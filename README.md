@@ -4,7 +4,7 @@ Smart Waste & Recycling Network for Madina, Accra. ICS 591 Team 2.
 
 | Folder | Contents |
 | --- | --- |
-| [`spec/`](spec/README.md) | Scope and architecture specification |
+| [`spec/`](spec/README.md) | Mission, roadmap, tech stack, policy, decisions, feature specs, and the scope and architecture specification |
 | [`backend/`](backend/README.md) | Engine: API, dispatcher, ledger, PIN, USSD and SMS. Python, FastAPI, Supabase |
 | [`frontend/`](frontend/README.md) | Household and rider PWAs |
 | [`intelligence/`](intelligence/README.md) | Waste verification classifier |

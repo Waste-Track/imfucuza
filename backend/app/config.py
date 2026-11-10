@@ -79,7 +79,7 @@ class Settings(BaseSettings):
     # households accept before their name appears on the leaderboard.
     voucher_valid_days: int = Field(30, gt=0)
     leaderboard_consent_version: str = "2026-10-lb1"
-    # Decision policy (engine-design.md section 5). Starting values until pilot
+    # Decision policy (spec/policy.md, photo checks). Starting values until pilot
     # data calibrates them. Change the version whenever a threshold changes.
     verification_policy_version: str = "2026-10-p1"
     verify_accept_at: float = Field(0.90, gt=0, le=1)
@@ -93,11 +93,11 @@ class Settings(BaseSettings):
     # Secret mixed into stored PIN hashes, so a database leak can't be brute-forced.
     pin_pepper: SecretStr = SecretStr("local-pin-pepper")
 
-    # Pricing, in pesewas and percent. Starting values (engine-plan.md, open question 1).
+    # Pricing, in pesewas and percent. Starting values (spec/policy.md).
     refuse_fee_pesewas: int = 1000
     rider_share_percent: int = 70
 
-    # Timings (engine-design.md sections 1 to 3). Starting values.
+    # Timings (spec/policy.md, paid pickups). Starting values.
     payment_window_s: int = 15 * 60
     dispatch_window_s: int = 45 * 60
     dispatch_retry_s: int = 3 * 60

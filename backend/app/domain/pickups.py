@@ -1,4 +1,4 @@
-"""Pickup lifecycle (engine-design.md section 1).
+"""Pickup lifecycle (spec/features/paid-pickup).
 
 The transition table is the single source of truth for which status changes
 are legal. `apply` performs one change with optimistic locking and records it

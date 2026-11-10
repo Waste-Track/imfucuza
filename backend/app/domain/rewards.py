@@ -1,4 +1,4 @@
-"""Rewards (engine-design.md section 4). Households spend points on vouchers
+"""Rewards (spec/features/rewards). Households spend points on vouchers
 that partner shops redeem by USSD, and households that opt in appear on a
 monthly leaderboard for their zone."""
 

@@ -1,8 +1,8 @@
 """Collecting and refunding the refuse pickup fee.
 
 Mobile money can't be held and captured later, so the fee is collected at
-request time and held in the pickup's escrow account (engine-plan.md
-section 1). Every change in money is confirmed with the provider's own record,
+request time and held in the pickup's escrow account (spec/discussions.md,
+Paystack for payments). Every change in money is confirmed with the provider's own record,
 never taken from a webhook body. Each collection is refunded on its own,
 keyed by its reference, so a household that paid twice gets both back.
 """
