@@ -13,7 +13,7 @@ it never moves money: the Engine's policy decides.
 | Training data | RealWaste (4,752 images, CC BY 4.0) plus human-labelled web images from Ghana (Stage 2 notebooks). Research use only; images are not in this repo |
 | Served as | ONNX (exported from PyTorch; the deploy notebook checks the outputs match), so the service needs no PyTorch and fits a 512 MB free instance |
 | Registry | Private Hugging Face model repo. The service downloads it at start-up, **pinned to a commit** and **checked by SHA-256** |
-| Local test results | Pay/no-pay decision 91.2% correct; clean plastic recall 100% (14/14); exact 4-way decision 60.2% (n = 113) |
+| Local test results | Exact 4-way decision 60.2% (n = 113); wrong payments (FAR) 10/99 before thresholds, 1 after the Engine's 0.90 / 0.80; honest households missed (FRR) 0/14 (notebooks 08–10) |
 | Intended use | Assistant to a human verifier during the pilot. Not for unsupervised payouts |
 
 How the model output becomes a contract reply:
