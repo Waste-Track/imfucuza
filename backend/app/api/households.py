@@ -196,6 +196,43 @@ async def pay(
     )
 
 
+class CheckoutView(BaseModel):
+    reference: str
+    # Opens Paystack's checkout window (PaystackPop.resumeTransaction).
+    access_code: str
+
+
+@router.post("/pickups/{pickup_id}/checkout")
+async def checkout(pickup_id: UUID, request: Request, household: HouseholdBriefDep) -> CheckoutView:
+    """Pay in the provider's checkout window, which asks for the network and
+    number. Calling again while it's unpaid returns the same transaction."""
+    try:
+        started = await payments.start_checkout(
+            request.app.state.pool, pickup_id=pickup_id, household_user_id=household.user.id
+        )
+    except LookupError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="pickup not found") from exc
+    return CheckoutView(reference=started.reference, access_code=started.access_code)
+
+
+@router.post("/pickups/{pickup_id}/payment/{reference}/check")
+async def check_payment(
+    pickup_id: UUID, reference: str, request: Request, household: HouseholdBriefDep
+) -> dict:
+    """Confirm a payment with the provider straight away, rather than waiting
+    for its webhook."""
+    try:
+        pickup_status = await payments.check_collection(
+            request.app.state.pool,
+            pickup_id=pickup_id,
+            household_id=household.household_id,
+            reference=reference,
+        )
+    except LookupError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="payment not found") from exc
+    return {"status": pickup_status}
+
+
 class PaymentOtp(BaseModel):
     reference: str
     otp: str = Field(min_length=3, max_length=12)

@@ -17,6 +17,8 @@ import httpx
 from app.adapters.base import (
     ChargeStarted,
     ChargeState,
+    Checkout,
+    CheckoutStarted,
     InvalidWebhook,
     MomoCharge,
     Network,
@@ -95,6 +97,24 @@ class PaystackProvider:
             },
         )
         return _charge_started(charge.reference, data)
+
+    async def start_checkout(self, checkout: Checkout) -> CheckoutStarted:
+        data = await self._call(
+            "POST",
+            "/transaction/initialize",
+            {
+                "email": checkout.email,
+                "amount": checkout.amount_pesewas,
+                "currency": "GHS",
+                "reference": checkout.reference,
+                "channels": ["mobile_money"],
+                "metadata": {"phone": checkout.phone_e164},
+            },
+        )
+        access_code = data.get("access_code")
+        if not isinstance(access_code, str) or not access_code:
+            raise self._error("paystack POST /transaction/initialize: no access code")
+        return CheckoutStarted(checkout.reference, access_code)
 
     async def submit_otp(self, reference: str, otp: str) -> ChargeStarted:
         data = await self._call("POST", "/charge/submit_otp", {"otp": otp, "reference": reference})

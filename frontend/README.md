@@ -8,6 +8,8 @@ New visitors land on a page that explains the service and offers "Get my waste c
 
 ## Supervisor console
 
+Households pay the pickup fee in Paystack's checkout window (`@paystack/inline-js`, loaded only when they tap Pay), which asks for their mobile money network and number. The Engine sets the transaction up (`POST /v1/pickups/{id}/checkout`) and hands back its access code, so no Paystack key is in the app. Reopening the window resumes the same transaction. When the window reports success the app asks the Engine to confirm it with Paystack at once (`POST /v1/pickups/{id}/payment/{reference}/check`) rather than waiting for the webhook.
+
 Riders are online whenever the app is open: opening it puts them on duty and shares their location on every rider screen, so dispatch can reach them, and "Take a break" stops new offers until they come back or next open the app. The Jobs tab has a map of the rider and their pickups (OpenStreetMap tiles through Leaflet), today's jobs and earnings, and the offers. History lists finished jobs with what each earned, and Earnings shows what's owed and the payouts made.
 
 Supervisors and admins who sign in get the console instead: a desktop-first page (it also works on a phone) with the review queue (claim an item, see the pickup, photos, photo check and timeline, then act and resolve), rider applications and rider management (approve, suspend, payouts, payout number, registering feature-phone riders), payouts waiting for approval or to record, complaint decisions waiting for a second supervisor, zones and landmarks, and rewards (vouchers, partner shops, monthly shop report).
