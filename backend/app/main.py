@@ -6,6 +6,8 @@ from contextlib import asynccontextmanager
 import anyio
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app import services
 from app.api import errors, households, internal, me, riders, supervisor, ussd, webhooks
@@ -23,6 +25,42 @@ class _RedactUssdToken(logging.Filter):
                 a.replace(token, "***") if isinstance(a, str) else a for a in record.args
             )
         return True
+
+
+log = logging.getLogger(__name__)
+
+
+class _CrashAsJson:
+    """Answers an unexpected error with a 500 from inside the CORS middleware.
+    Starlette's own 500 comes from outside it, without CORS headers, so a
+    browser can't read it and the app could only say it was offline."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        started = False
+
+        async def tracking_send(message: Message) -> None:
+            nonlocal started
+            if message["type"] == "http.response.start":
+                started = True
+            await send(message)
+
+        try:
+            await self.app(scope, receive, tracking_send)
+        except Exception:
+            log.exception("unhandled error: %s %s", scope["method"], scope["path"])
+            if started:
+                raise
+            response = JSONResponse(
+                status_code=500,
+                content={"detail": "something went wrong on our side, try again in a minute"},
+            )
+            await response(scope, receive, send)
 
 
 class _QuietTicks(logging.Filter):
@@ -66,6 +104,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(title="Engine", version="0.1.0", lifespan=lifespan)
 errors.install(app)
+# Added first, so it runs inside CORS.
+app.add_middleware(_CrashAsJson)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=get_settings().cors_allowed_origins,
