@@ -1,4 +1,4 @@
-"""USSD menus for riders and households on feature phones (engine-design.md section 10).
+"""USSD menus for riders and households on feature phones (spec/features/feature-phone-ussd).
 
 Each keypress arrives as its own request. The session row remembers the
 screen and anything chosen so far. Screens stay within 160 characters, the

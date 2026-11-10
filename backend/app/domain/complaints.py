@@ -1,4 +1,4 @@
-"""Complaints and disputes (engine-design.md sections 1 and 6).
+"""Complaints and disputes (spec/features/complaints).
 
 Before giving its PIN a household can dispute a pickup: the money stays held
 until a supervisor reissues the PIN or refunds, and an undecided dispute is

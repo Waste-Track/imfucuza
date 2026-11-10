@@ -1,4 +1,4 @@
-"""Plastic verification (engine-design.md section 5). The classifier gives a
+"""Plastic verification (spec/features/waste-classifier). The classifier gives a
 verdict and a confidence. This policy, owned by the Engine, decides what
 happens next. Escalation to a supervisor is pattern-based and lives elsewhere."""
 

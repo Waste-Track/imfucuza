@@ -1,4 +1,4 @@
-"""The supervisor queue (engine-design.md section 6)."""
+"""The supervisor queue (spec/features/supervisor-console)."""
 
 from datetime import timedelta
 from typing import Any

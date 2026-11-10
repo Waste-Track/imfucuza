@@ -1,4 +1,4 @@
-"""Pickup confirmation PINs (engine-design.md section 3).
+"""Pickup confirmation PINs (spec/features/paid-pickup).
 
 A PIN is issued once the rider has collected, sent to the household by SMS,
 and stored only as an HMAC. Confirming it completes the pickup and releases

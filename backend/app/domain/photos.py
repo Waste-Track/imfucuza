@@ -1,4 +1,4 @@
-"""Photo intake (engine-design.md section 5). Every upload is re-encoded
+"""Photo intake (spec/features/plastic-collection). Every upload is re-encoded
 before it is stored, which drops EXIF, its GPS position and any comment, and
 fingerprinted so the same photo can't be used for two pickups.
 

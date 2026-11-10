@@ -1,4 +1,4 @@
-"""The ledger postings for pickups (engine-design.md section 4)."""
+"""The ledger postings for pickups (spec/features/paid-pickup)."""
 
 from uuid import UUID
 
